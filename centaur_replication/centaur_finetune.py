@@ -81,12 +81,22 @@ def main():
         raise ValueError("set at most one of --held_out_study / --held_out_paradigm")
 
     held_out_studies = [loo_args.held_out_study] if loo_args.held_out_study else None
-    train_dataset, eval_datasets = dl.build_training_dataset(
-        held_out_studies=held_out_studies,
-        held_out_paradigm=loo_args.held_out_paradigm,
-        seed=training_args.seed,
-        max_participants_per_study=loo_args.max_participants_per_study,
-    )
+    # Pooling/parsing the full corpus is expensive (raw JSONL + on-the-fly zip
+    # extraction across ~27 studies) and data_loader.build_training_dataset now
+    # caches its result to disk -- but under a multi-GPU `torchrun` launch, every
+    # DDP rank runs this exact main() independently, so without this barrier all N
+    # ranks would race to build (and redundantly pay for) that same expensive pool
+    # simultaneously. main_process_first() makes rank 0 build+cache it alone while
+    # the other ranks wait, then they all hit the now-populated cache -- a no-op
+    # single pass-through when not running under torchrun at all.
+    from accelerate import PartialState
+    with PartialState().main_process_first():
+        train_dataset, eval_datasets = dl.build_training_dataset(
+            held_out_studies=held_out_studies,
+            held_out_paradigm=loo_args.held_out_paradigm,
+            seed=training_args.seed,
+            max_participants_per_study=loo_args.max_participants_per_study,
+        )
 
     # Everything below mirrors finetune.py's own structure line-for-line where
     # possible -- imported here, not at module top, so this file can still be

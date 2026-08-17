@@ -11,9 +11,11 @@ did (prompts_fixed.jsonl) -- this module only pools, filters, splits, and chunks
 oversized sequences, matching Centaur's own "preprocessing already happened upstream"
 pattern (Psych-101 was pre-built; finetune.py itself does zero .map()/preprocessing).
 """
+import hashlib
 import io
 import json
 import math
+import os
 import zipfile
 from pathlib import Path
 
@@ -221,6 +223,32 @@ def leakage_safe_split(records: list[dict], test_frac: float = 0.10, seed: int =
     return train, test
 
 
+def _dataset_cache_key(*parts) -> str:
+    """Deterministic short key from run-shape parameters (held-out selection,
+    seed, cap, etc.) -- used to name a persistent on-disk cache dir under
+    DATA_CACHE, so an identical call (same params) loads instantly instead of
+    re-pooling/re-parsing raw JSONL from scratch. Different parameter
+    combinations get different keys, so nothing stale gets reused by accident."""
+    raw = "|".join("" if p is None else str(p) for p in parts)
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def _load_cached_dataset(cache_dir: Path) -> "Dataset | None":
+    return Dataset.load_from_disk(str(cache_dir)) if cache_dir.is_dir() else None
+
+
+def _save_cached_dataset(ds: "Dataset", cache_dir: Path):
+    """Builds to a temp dir then atomically renames into place -- if two processes
+    race to build the same (uncached) dataset simultaneously (e.g. two DDP ranks
+    that reach this call before either's cache write completes), the loser's
+    rename just overwrites the winner's with an equivalent dataset rather than
+    corrupting a partially-written cache dir."""
+    DATA_CACHE.mkdir(parents=True, exist_ok=True)
+    tmp_dir = DATA_CACHE / f".tmp_{cache_dir.name}_{os.getpid()}"
+    ds.save_to_disk(str(tmp_dir))
+    os.replace(tmp_dir, cache_dir)
+
+
 def build_training_dataset(held_out_studies: list[str] | None = None,
                             held_out_paradigm: str | None = None,
                             inner_split: bool = True, seed: int = 100,
@@ -238,7 +266,23 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
     guard means every study contributes 0 records to the inner eval split, so
     inner_eval_dataset comes back None -- harmless (real runs already treat this
     split as functionally inert at --eval_steps 999999), not a bug.
+
+    Cached to disk under DATA_CACHE, keyed by every parameter that affects the
+    result -- pooling/parsing the full ~41k-sequence corpus is expensive (raw
+    JSONL parsing + on-the-fly zip extraction for ~27 studies), and under a
+    multi-GPU torchrun launch every DDP rank calls this independently; wrap this
+    call in accelerate's `PartialState().main_process_first()` (see
+    centaur_finetune.py) so only rank 0 pays that cost and the other ranks hit
+    this cache instead of redoing it in parallel.
     """
+    key = _dataset_cache_key("train", sorted(held_out_studies or []), held_out_paradigm,
+                              inner_split, seed, max_participants_per_study)
+    train_cache = DATA_CACHE / f"train_{key}"
+    eval_cache = DATA_CACHE / f"eval_{key}"
+    cached_train = _load_cached_dataset(train_cache)
+    if cached_train is not None:
+        return cached_train, _load_cached_dataset(eval_cache)
+
     held_out = set(held_out_studies or [])
     if held_out_paradigm:
         held_out |= set(studies_in_paradigm(held_out_paradigm))
@@ -258,6 +302,10 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
 
     train_ds = Dataset.from_list([_row(r) for r in train_records]).shuffle(seed=seed)
     eval_ds = Dataset.from_list([_row(r) for r in test_records]) if test_records else None
+
+    _save_cached_dataset(train_ds, train_cache)
+    if eval_ds is not None:
+        _save_cached_dataset(eval_ds, eval_cache)
     return train_ds, eval_ds
 
 
