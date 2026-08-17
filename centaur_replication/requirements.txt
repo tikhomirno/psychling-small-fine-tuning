@@ -1,0 +1,14 @@
+# Cluster (CUDA) requirements for centaur_finetune.py / centaur_eval.py.
+# Centaur's own repo doesn't pin versions either (no requirements.txt in
+# marcelbinz/Llama-3.1-Centaur-70B) -- letting `unsloth`'s own installer resolve
+# compatible peft/trl/transformers/bitsandbytes versions is the safer bet than
+# guessing exact pins here.
+unsloth
+trl
+peft
+bitsandbytes
+transformers
+datasets
+accelerate
+huggingface_hub
+pandas
