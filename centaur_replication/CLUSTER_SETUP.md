@@ -24,13 +24,37 @@ notebook cells, in order — no terminal required, though a JupyterLab terminal 
    so a terminal is convenient if you have one but never required.
 6. **Get the code onto the cluster.** Two options:
    - **Preferred**: if the session has outbound network access, git-clone the
-     `cluster_bundle` repo directly from a notebook cell:
+     `cluster_bundle` repo directly from a notebook cell. The repo is **private**,
+     so a plain `!git clone https://github.com/...` will hang waiting for a
+     username/password that a notebook `!`-cell has no real terminal to collect —
+     use a GitHub Personal Access Token instead, entered with `getpass` so it never
+     ends up saved in the notebook's cell source or output:
      ```python
-     !git clone <your-cluster_bundle-repo-url>
+     import subprocess
+     from getpass import getpass
+
+     token = getpass("GitHub token: ")
+     subprocess.run(
+         ["git", "clone", f"https://{token}@github.com/tikhomirno/psychling-small-fine-tuning.git",
+          "cluster_bundle"],
+         check=True,
+     )
+     ```
+     ```python
      %cd cluster_bundle
      ```
-     (This matches what `package_for_cluster.sh` itself prints as the intended next
-     step: push `cluster_bundle/` to a private GitHub repo, then clone it here.)
+     (Generate the token once, in your browser: GitHub → Settings → Developer
+     settings → Personal access tokens → generate a fine-grained token scoped to
+     just this repo, "Contents: Read" is enough.)
+
+     If `cluster_bundle` is already cloned here from an earlier session, pull the
+     update instead of re-cloning:
+     ```python
+     %cd cluster_bundle
+     ```
+     ```python
+     subprocess.run(["git", "pull", f"https://{token}@github.com/tikhomirno/psychling-small-fine-tuning.git", "main"], check=True)
+     ```
    - **Fallback**: if outbound git access isn't available, use Workbench's file
      browser to upload `cluster_bundle/` — drag-and-drop onto the file browser pane,
      or use its upload-arrow icon. For a zipped bundle, upload the zip and unzip it
