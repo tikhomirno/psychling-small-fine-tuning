@@ -60,6 +60,11 @@ class LeaveOneOutArguments:
     pattern rather than a different script per condition."""
     held_out_study: Optional[str] = field(default=None)
     held_out_paradigm: Optional[str] = field(default=None)
+    max_participants_per_study: Optional[int] = field(
+        default=None,
+        metadata={"help": "Cap real participants per study to this many -- for a "
+                           "tiny cluster smoke test only (see cluster_smoke_test.py). "
+                           "None (default) means every real run uses the full dataset."})
 
 
 def main():
@@ -80,6 +85,7 @@ def main():
         held_out_studies=held_out_studies,
         held_out_paradigm=loo_args.held_out_paradigm,
         seed=training_args.seed,
+        max_participants_per_study=loo_args.max_participants_per_study,
     )
 
     # Everything below mirrors finetune.py's own structure line-for-line where

@@ -122,9 +122,43 @@ def _chunk_record(record: dict) -> list[dict]:
     return out
 
 
-def load_all_records(studies: list[str] | None = None) -> list[dict]:
+def _cap_participants(records: list[dict], max_participants_per_study: int,
+                       seed: int = 100) -> list[dict]:
+    """Keeps at most `max_participants_per_study` real participants per study --
+    for a cluster pre-flight smoke test (cluster_smoke_test.py), never for a real
+    run. Groups by (experiment, _source_participant_id or participant_id), the same
+    key leakage_safe_split already groups by, so a chunked CHUNK_CANDIDATES study
+    never loses only some of one participant's chunks -- "1 participant" always
+    means one complete real participant, including every chunk of an oversized
+    session. Deterministic given `seed` (sorted keys, then shuffled, then take the
+    first N) so repeated smoke-test runs sample the same participants."""
+    import random
+
+    rng = random.Random(seed)
+    by_experiment: dict[str, dict[str, list[dict]]] = {}
+    for r in records:
+        key = r.get("_source_participant_id", r["participant_id"])
+        by_experiment.setdefault(r["experiment"], {}).setdefault(key, []).append(r)
+
+    out = []
+    for exp, groups in by_experiment.items():
+        keys = sorted(groups.keys())
+        rng.shuffle(keys)
+        for key in keys[:max_participants_per_study]:
+            out.extend(groups[key])
+    return out
+
+
+def load_all_records(studies: list[str] | None = None,
+                      max_participants_per_study: int | None = None,
+                      seed: int = 100) -> list[dict]:
     """Loads every in-scope study's records, applying trial-boundary chunking to the
-    two studies confirmed to need it (FINETUNING_PLAN_CENTAUR_REPLICATION.md §4)."""
+    two studies confirmed to need it (FINETUNING_PLAN_CENTAUR_REPLICATION.md §4).
+
+    `max_participants_per_study` is None for every real run (full dataset,
+    unchanged behavior) -- pass an int only for a tiny cluster smoke test. Applied
+    AFTER chunking: chunking is what produces `_source_participant_id`, so capping
+    before it would have nothing correct to group on."""
     studies = studies or STUDIES
     all_records = []
     for study in studies:
@@ -135,6 +169,8 @@ def load_all_records(studies: list[str] | None = None) -> list[dict]:
                 chunked.extend(_chunk_record(r))
             records = chunked
         all_records.extend(records)
+    if max_participants_per_study is not None:
+        all_records = _cap_participants(all_records, max_participants_per_study, seed=seed)
     return all_records
 
 
@@ -187,20 +223,29 @@ def leakage_safe_split(records: list[dict], test_frac: float = 0.10, seed: int =
 
 def build_training_dataset(held_out_studies: list[str] | None = None,
                             held_out_paradigm: str | None = None,
-                            inner_split: bool = True, seed: int = 100):
+                            inner_split: bool = True, seed: int = 100,
+                            max_participants_per_study: int | None = None):
     """Builds the pooled training pool for one leave-one-out run.
 
     Returns (train_dataset, inner_eval_dataset) -- the inner_eval_dataset is
     Centaur's own 90/10 in-training holdout (functionally inert at
     --eval_steps 999999, but included for parity; see the plan's "where the 90/10
     split comes from" note).
+
+    `max_participants_per_study` is None for every real run -- pass an int (e.g. 1)
+    only to build a tiny cluster smoke-test pool (see cluster_smoke_test.py). Note:
+    with a 1-participant cap, leakage_safe_split's own `len(participant_keys) > 1`
+    guard means every study contributes 0 records to the inner eval split, so
+    inner_eval_dataset comes back None -- harmless (real runs already treat this
+    split as functionally inert at --eval_steps 999999), not a bug.
     """
     held_out = set(held_out_studies or [])
     if held_out_paradigm:
         held_out |= set(studies_in_paradigm(held_out_paradigm))
 
     pool_studies = [s for s in STUDIES if s not in held_out]
-    records = load_all_records(pool_studies)
+    records = load_all_records(pool_studies, max_participants_per_study=max_participants_per_study,
+                                seed=seed)
 
     if inner_split:
         train_records, test_records = leakage_safe_split(records, seed=seed)
@@ -244,10 +289,19 @@ def _ensure_plain_jsonl(study: str) -> str:
 
 
 def build_held_out_dataset(held_out_studies: list[str] | None = None,
-                            held_out_paradigm: str | None = None):
+                            held_out_paradigm: str | None = None,
+                            max_participants_per_study: int | None = None):
     """Loads the held-out generalization test set, mirroring generalization.py's own
     `load_dataset('json', data_files={'test': [task_name]})` pattern as literally as
-    possible -- real file paths, not records re-serialized from Python."""
+    possible -- real file paths, not records re-serialized from Python.
+
+    `max_participants_per_study` is None for every real run -- pass an int (e.g. 1)
+    only for a tiny cluster smoke test (see cluster_smoke_test.py). Applied as a
+    post-hoc filter on the loaded Dataset (first N sorted unique participant_id
+    values per study), deliberately NOT by rebuilding this function on top of
+    load_all_records/_cap_participants -- that would break the real-file-path
+    parity with generalization.py this function is built to preserve.
+    """
     held_out = list(held_out_studies or [])
     if held_out_paradigm:
         held_out = studies_in_paradigm(held_out_paradigm)
@@ -259,4 +313,13 @@ def build_held_out_dataset(held_out_studies: list[str] | None = None,
     # column -- but worth knowing if inspecting this dataset's `experiment` column
     # directly.
     paths = [_ensure_plain_jsonl(study) for study in held_out]
-    return load_dataset("json", data_files={"test": paths})["test"]
+    ds = load_dataset("json", data_files={"test": paths})["test"]
+
+    if max_participants_per_study is not None:
+        by_experiment: dict[str, set[str]] = {}
+        for exp, pid in zip(ds["experiment"], ds["participant_id"]):
+            by_experiment.setdefault(exp, set()).add(str(pid))
+        keep = {exp: set(sorted(pids)[:max_participants_per_study])
+                for exp, pids in by_experiment.items()}
+        ds = ds.filter(lambda r: str(r["participant_id"]) in keep.get(r["experiment"], set()))
+    return ds
