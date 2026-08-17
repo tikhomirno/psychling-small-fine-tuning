@@ -127,6 +127,15 @@ def main():
     collator = DataCollatorForCompletionOnlyLM(
         response_template=l_id, instruction_template=r_id, tokenizer=tokenizer)
 
+    # Recent transformers hard-validates eval_strategy != "no" against having a
+    # real eval_dataset (Trainer._validate_args). eval_datasets is None whenever
+    # every pooled study has <=1 real participant after leakage_safe_split's own
+    # guard -- true for every real run's inner-eval split in practice (studies
+    # always have many participants), but exactly what happens under
+    # max_participants_per_study=1 (cluster_smoke_test.py). Falling back to "no"
+    # only in that case, never silently changing behavior for a real run.
+    effective_eval_strategy = training_args.eval_strategy if eval_datasets is not None else "no"
+
     trainer = UnslothTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -152,7 +161,7 @@ def main():
             # Centaur's own cluster_train.sh flag is --evaluation_strategy; current
             # transformers renamed this TrainingArguments field to eval_strategy --
             # same value, name changed upstream since their script was written.
-            eval_strategy=training_args.eval_strategy,
+            eval_strategy=effective_eval_strategy,
             eval_steps=training_args.eval_steps,
             save_strategy=training_args.save_strategy,
             save_steps=training_args.save_steps,
