@@ -17,14 +17,19 @@ output_dir, then:
     python centaur_finetune.py loo_balota2007_LDT_config.json
 
 centaur_config.json's values match scripts/cluster_train.sh exactly (verified this
-session), with one deliberate exception: model_name_or_path is our own
+session), with two deliberate exceptions: model_name_or_path is our own
 unsloth/Meta-Llama-3.1-8B-bnb-4bit (matching Minitaur, per this session's earlier
-decision), not cluster_train.sh's literal 70B path. num_train_epochs defaults to 5,
-matching the actual training script, not the "one epoch" description in the paper's
-methods text -- see FINETUNING_PLAN_CENTAUR_REPLICATION.md for that discrepancy and
-why the code is treated as authoritative here. A plain CLI-flags invocation also
-works (HfArgumentParser), but skips the config file's guarantee that every value
-matches Centaur's real recipe rather than falling back to a generic HF default.
+decision), not cluster_train.sh's literal 70B path; and num_train_epochs is set to
+1 (matching the paper's own methods-text description), not the real script's
+literal 5 -- see FINETUNING_PLAN_CENTAUR_REPLICATION.md for that discrepancy.
+5 epochs is what the real code does and is the more literal replication, but for
+a 28-study sweep the wall-clock cost multiplies accordingly (measured this
+session: ~5x), so 1 epoch is the deliberate default here for tractability -- pass
+num_train_epochs=5 explicitly in a run's own config if literal recipe fidelity
+matters more than sweep turnaround time for a specific run. A plain CLI-flags
+invocation also works (HfArgumentParser), but skips the config file's guarantee
+that every value matches this session's chosen recipe rather than falling back
+to a generic HF default.
 """
 import sys
 from dataclasses import dataclass, field
@@ -65,6 +70,12 @@ class LeaveOneOutArguments:
         metadata={"help": "Cap real participants per study to this many -- for a "
                            "tiny cluster smoke test only (see cluster_smoke_test.py). "
                            "None (default) means every real run uses the full dataset."})
+    disable_subsampling: bool = field(
+        default=False,
+        metadata={"help": "Skip the 100k-trial-per-study / 500k-trial-per-paradigm caps "
+                           "entirely and pool the OLD, fully unbounded data instead. False "
+                           "(the default) for every normal run -- set True only for a "
+                           "deliberate full-data-vs-subsampled comparison run."})
 
 
 def main():
@@ -96,6 +107,7 @@ def main():
             held_out_paradigm=loo_args.held_out_paradigm,
             seed=training_args.seed,
             max_participants_per_study=loo_args.max_participants_per_study,
+            disable_subsampling=loo_args.disable_subsampling,
         )
 
     # Everything below mirrors finetune.py's own structure line-for-line where

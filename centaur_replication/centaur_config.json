@@ -8,7 +8,7 @@
   "held_out_study": null,
   "held_out_paradigm": null,
   "seed": 100,
-  "num_train_epochs": 5,
+  "num_train_epochs": 1,
   "log_level": "info",
   "logging_strategy": "steps",
   "logging_steps": 1,

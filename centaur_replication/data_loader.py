@@ -416,7 +416,8 @@ def _save_cached_dataset(ds: "Dataset", cache_dir: Path):
 def build_training_dataset(held_out_studies: list[str] | None = None,
                             held_out_paradigm: str | None = None,
                             inner_split: bool = True, seed: int = 100,
-                            max_participants_per_study: int | None = None):
+                            max_participants_per_study: int | None = None,
+                            disable_subsampling: bool = False):
     """Builds the pooled training pool for one leave-one-out run.
 
     Returns (train_dataset, inner_eval_dataset) -- the inner_eval_dataset is
@@ -430,6 +431,13 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
     guard means every study contributes 0 records to the inner eval split, so
     inner_eval_dataset comes back None -- harmless (real runs already treat this
     split as functionally inert at --eval_steps 999999), not a bug.
+
+    `disable_subsampling` is False for every real run (the 100k-trial-per-study /
+    500k-trial-per-paradigm caps apply as normal, the intended default) -- pass
+    True only to deliberately reproduce the OLD, pre-subsampling, fully unbounded
+    pool, e.g. for a direct full-data-vs-subsampled comparison run. Threaded into
+    the cache key (below) so a disabled-subsampling run and a normal capped run
+    for the same held-out study never collide in the on-disk dataset cache.
 
     Cached to disk under DATA_CACHE, keyed by every parameter that affects the
     result -- pooling/parsing the full ~41k-sequence corpus is expensive (raw
@@ -451,7 +459,7 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
     key = _dataset_cache_key("train", sorted(held_out_studies or []), held_out_paradigm,
                               inner_split, seed, max_participants_per_study,
                               TARGET_TRIALS_PER_STUDY, TARGET_TRIALS_PER_PARADIGM,
-                              SUBSAMPLING_VERSION)
+                              SUBSAMPLING_VERSION, disable_subsampling)
     train_cache = DATA_CACHE / f"train_{key}"
     eval_cache = DATA_CACHE / f"eval_{key}"
     cached_train = _load_cached_dataset(train_cache)
@@ -461,18 +469,29 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
     if held_out_paradigm:
         held_out = set(studies_in_paradigm(held_out_paradigm))
         pool_studies = [s for s in STUDIES if s not in held_out]
-        # Leave-one-PARADIGM-out: pool capped per-paradigm (500k trials, equal
-        # per-study within each remaining paradigm), NOT the per-study 100k cap --
-        # a separate, mutually exclusive pooling strategy from the study-out case.
-        records = build_paradigm_balanced_records(pool_studies, seed=seed)
+        if disable_subsampling:
+            # No per-paradigm-balanced equivalent of "disabled" -- fall back to
+            # plain unbounded per-study loading (still excludes the held-out
+            # paradigm's studies, just skips both the 100k/study and 500k/paradigm
+            # caps entirely).
+            records = load_all_records(pool_studies, seed=seed, target_trials_per_study=None)
+        else:
+            # Leave-one-PARADIGM-out: pool capped per-paradigm (500k trials,
+            # equal per-study within each remaining paradigm), NOT the per-study
+            # 100k cap -- a separate, mutually exclusive pooling strategy from
+            # the study-out case.
+            records = build_paradigm_balanced_records(pool_studies, seed=seed)
     else:
         held_out = set(held_out_studies or [])
         pool_studies = [s for s in STUDIES if s not in held_out]
         # Leave-one-STUDY-out (and the no-held-out full-pool reference run):
         # per-study 100k-trial cap applies by default (load_all_records's own
-        # default), plus max_participants_per_study for the smoke test if set.
-        records = load_all_records(pool_studies, max_participants_per_study=max_participants_per_study,
-                                    seed=seed)
+        # default), plus max_participants_per_study for the smoke test if set --
+        # unless disable_subsampling explicitly asks for the old, fully unbounded
+        # pool instead (target_trials_per_study=None turns the cap off entirely).
+        records = load_all_records(
+            pool_studies, max_participants_per_study=max_participants_per_study, seed=seed,
+            target_trials_per_study=None if disable_subsampling else TARGET_TRIALS_PER_STUDY)
 
     if inner_split:
         train_records, test_records = leakage_safe_split(records, seed=seed)
