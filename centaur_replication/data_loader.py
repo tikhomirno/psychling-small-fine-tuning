@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
-from datasets import Dataset, Value, concatenate_datasets, load_dataset
+from datasets import Dataset
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_CACHE = Path(__file__).resolve().parent / "data"
@@ -480,8 +480,8 @@ def _ensure_plain_jsonl(study: str) -> str:
     prompts.jsonl if either exists directly (plain); otherwise extracts whichever
     zip variant exists (prompts_fixed.jsonl.zip or prompts.jsonl.zip -- the cluster
     bundle from package_for_cluster.sh always zips) into DATA_CACHE once (cached,
-    not re-extracted every call), since load_dataset('json', ...) needs a real file
-    path, not a zip member."""
+    not re-extracted every call), since build_held_out_dataset needs a real file
+    path to read line-by-line, not a zip member."""
     study_dir = ROOT / study
     for plain_name, zip_name in (("prompts_fixed.jsonl", "prompts_fixed.jsonl.zip"),
                                   ("prompts.jsonl", "prompts.jsonl.zip")):
@@ -505,14 +505,28 @@ def _ensure_plain_jsonl(study: str) -> str:
 def build_held_out_dataset(held_out_studies: list[str] | None = None,
                             held_out_paradigm: str | None = None,
                             max_participants_per_study: int | None = None):
-    """Loads the held-out generalization test set, mirroring generalization.py's own
-    `load_dataset('json', data_files={'test': [task_name]})` pattern as literally as
-    possible -- real file paths, not records re-serialized from Python.
+    """Loads the held-out generalization test set from real, on-disk file paths
+    (via _ensure_plain_jsonl) -- not records re-serialized from Python -- keeping
+    the spirit of generalization.py's real-file-based loading.
+
+    Reads each study's raw JSONL with plain Python `json.loads` (not
+    `datasets.load_dataset('json', ...)`, despite that being generalization.py's
+    own literal call): real per-study raw files carry many extra columns beyond
+    text/experiment/participant_id (rt, age, gender, batch_no, etc.), and two
+    separate real failures confirmed this session that pyarrow's strict JSON
+    schema inference chokes on them -- (1) a single study's own file with a
+    column whose type varies row-to-row (balota2007_LDT's `gender`: string in
+    some rows, numeric in others), and (2) incompatible schemas across different
+    studies' files when held_out_paradigm spans more than one study. Plain
+    Python dict parsing doesn't care about cross-row/cross-file type
+    consistency in columns we don't even use, so extracting only the 3 needed
+    columns this way sidesteps both failure modes at the root rather than
+    patching each one as it's discovered.
 
     `max_participants_per_study` is None for every real run -- pass an int (e.g. 1)
     only for a tiny cluster smoke test (see cluster_smoke_test.py). Applied as a
-    post-hoc filter on the loaded Dataset (first N sorted unique participant_id
-    values per study), deliberately NOT by rebuilding this function on top of
+    post-hoc filter (first N sorted unique participant_id values per study),
+    deliberately NOT by rebuilding this function on top of
     load_all_records/_cap_participants -- that would break the real-file-path
     parity with generalization.py this function is built to preserve.
     """
@@ -527,31 +541,12 @@ def build_held_out_dataset(held_out_studies: list[str] | None = None,
     # column -- but worth knowing if inspecting this dataset's `experiment` column
     # directly.
     paths = [_ensure_plain_jsonl(study) for study in held_out]
-    if len(paths) == 1:
-        ds = load_dataset("json", data_files={"test": paths})["test"]
-    else:
-        # Different studies' raw JSONL files carry different extra columns (rt,
-        # age, batch_no, gender, etc. vary by source study) -- a single
-        # load_dataset(..., data_files=[multiple files]) call tries to unify all
-        # files into one Arrow schema and fails on incompatible column types
-        # across files (confirmed: held_out_paradigm against a real multi-study
-        # paradigm, e.g. "lexical decision"'s 5 studies). Load each study's file
-        # separately, keep only the 3 columns actually used downstream, then
-        # concatenate -- sidesteps the cross-file schema-unification entirely.
-        parts = []
-        for path in paths:
-            part = load_dataset("json", data_files={"test": [path]})["test"]
-            part = part.select_columns(["text", "experiment", "participant_id"])
-            # participant_id's raw type also varies by source study (int64 vs
-            # string) -- normalize before concatenating, matching how every other
-            # participant_id use in this file already treats it as a string
-            # (e.g. build_training_dataset's _row(), _cap_participants). cast_column
-            # (not .map(), which doesn't reliably override Arrow's inferred schema
-            # type here) forces the actual stored feature type to string.
-            if part.features["participant_id"].dtype != "string":
-                part = part.cast_column("participant_id", Value("string"))
-            parts.append(part)
-        ds = concatenate_datasets(parts)
+    rows = []
+    for path in paths:
+        for r in _read_jsonl(Path(path)):
+            rows.append({"text": r["text"], "experiment": r["experiment"],
+                         "participant_id": str(r.get("participant_id", r.get("participant")))})
+    ds = Dataset.from_list(rows)
 
     if max_participants_per_study is not None:
         by_experiment: dict[str, set[str]] = {}
