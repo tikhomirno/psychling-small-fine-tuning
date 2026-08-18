@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path
 
 import pandas as pd
-from datasets import Dataset, concatenate_datasets, load_dataset
+from datasets import Dataset, Value, concatenate_datasets, load_dataset
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_CACHE = Path(__file__).resolve().parent / "data"
@@ -151,25 +151,96 @@ def _cap_participants(records: list[dict], max_participants_per_study: int,
     return out
 
 
+def _count_trials(text: str) -> int:
+    return text.count("<<")
+
+
+def _subsample_to_trial_count(records: list[dict], target_trials: int,
+                               seed: int = 100) -> list[dict]:
+    """Randomly (seeded) subsamples records down to ~target_trials worth of
+    <<...>> targets -- per your explicit instruction, each record (one JSON line,
+    including individual chunks of an oversized session) is treated as its own
+    independent unit here, NOT grouped back to the real source participant the
+    way leakage_safe_split/_cap_participants do elsewhere in this file. This is a
+    corpus-volume concern, not a leakage-safety one, so a study with pre-existing
+    multi-row-per-participant "batch" structure (balota2007_LDT,
+    balota2007_naming) gets each row sampled independently.
+
+    Returns every record unchanged if the true total is already <= target_trials
+    (never pads up to reach the target). Deterministic given `seed`."""
+    import random
+
+    total = sum(_count_trials(r["text"]) for r in records)
+    if total <= target_trials:
+        return records
+    rng = random.Random(seed)
+    order = list(range(len(records)))
+    rng.shuffle(order)
+    out, cum = [], 0
+    for i in order:
+        out.append(records[i])
+        cum += _count_trials(records[i]["text"])
+        if cum >= target_trials:
+            break
+    return out
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    with path.open(encoding="utf-8") as fh:
+        return [json.loads(l) for l in fh if l.strip()]
+
+
+def _write_jsonl(path: Path, records: list[dict]):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+
+
+TARGET_TRIALS_PER_STUDY = 100_000
+SUBSAMPLED_BY_STUDY_DIR = DATA_CACHE / "subsampled_by_study"
+
+
 def load_all_records(studies: list[str] | None = None,
                       max_participants_per_study: int | None = None,
-                      seed: int = 100) -> list[dict]:
+                      seed: int = 100,
+                      target_trials_per_study: int | None = TARGET_TRIALS_PER_STUDY) -> list[dict]:
     """Loads every in-scope study's records, applying trial-boundary chunking to the
-    two studies confirmed to need it (FINETUNING_PLAN_CENTAUR_REPLICATION.md §4).
+    two studies confirmed to need it (FINETUNING_PLAN_CENTAUR_REPLICATION.md §4),
+    then subsamples each study down to `target_trials_per_study` individual
+    <<...>> targets (the new default corpus-balance fix -- was previously
+    unbounded; real per-study counts range from 2,920 to 10.6M trials).
 
-    `max_participants_per_study` is None for every real run (full dataset,
-    unchanged behavior) -- pass an int only for a tiny cluster smoke test. Applied
-    AFTER chunking: chunking is what produces `_source_participant_id`, so capping
-    before it would have nothing correct to group on."""
+    If `build_subsampled_corpus.py` has already been run, the DEFAULT
+    (target_trials_per_study == TARGET_TRIALS_PER_STUDY) path loads directly from
+    its materialized `subsampled_by_study/<study>.jsonl` output instead of
+    re-parsing+re-subsampling raw JSONL every call -- guarantees the training run
+    uses exactly the same subsample you can inspect on disk. Falls back to live
+    computation if that file doesn't exist yet (e.g. a fresh clone), or whenever a
+    caller passes a different target_trials_per_study explicitly (e.g. None, used
+    internally by build_paradigm_balanced_records to get the raw, unsubsampled
+    pool before applying its own per-paradigm rule).
+
+    `max_participants_per_study` is None for every real run (unrelated to the
+    trial-count subsampling above) -- pass an int only for a tiny cluster smoke
+    test. Applied AFTER trial subsampling: chunking is what produces
+    `_source_participant_id`, so participant-capping before it would have nothing
+    correct to group on."""
     studies = studies or STUDIES
     all_records = []
     for study in studies:
-        records = _read_records(study)
-        if study in CHUNK_CANDIDATES:
-            chunked = []
-            for r in records:
-                chunked.extend(_chunk_record(r))
-            records = chunked
+        cached_path = SUBSAMPLED_BY_STUDY_DIR / f"{study}.jsonl"
+        if target_trials_per_study == TARGET_TRIALS_PER_STUDY and cached_path.is_file():
+            records = _read_jsonl(cached_path)
+        else:
+            records = _read_records(study)
+            if study in CHUNK_CANDIDATES:
+                chunked = []
+                for r in records:
+                    chunked.extend(_chunk_record(r))
+                records = chunked
+            if target_trials_per_study is not None:
+                records = _subsample_to_trial_count(records, target_trials_per_study, seed=seed)
         all_records.extend(records)
     if max_participants_per_study is not None:
         all_records = _cap_participants(all_records, max_participants_per_study, seed=seed)
@@ -187,6 +258,93 @@ def paradigm_lookup() -> dict[str, str]:
 def studies_in_paradigm(paradigm: str) -> list[str]:
     lookup = paradigm_lookup()
     return [s for s, p in lookup.items() if p == paradigm]
+
+
+TARGET_TRIALS_PER_PARADIGM = 500_000
+SUBSAMPLED_BY_PARADIGM_DIR = DATA_CACHE / "subsampled_by_paradigm"
+
+
+def _paradigm_slug(paradigm: str) -> str:
+    import re
+
+    return re.sub(r"[^A-Za-z0-9]+", "_", paradigm)
+
+
+def _subsample_paradigm_equal(records_by_study: dict[str, list[dict]],
+                               target_trials: int, seed: int = 100) -> list[dict]:
+    """Equal-per-study subsampling within one paradigm, with shortfall
+    redistribution: sorts studies ascending by available trial count, assigns
+    each study min(its own total, the current equal share of the still-unassigned
+    target across still-unassigned studies) -- so a study too small to meet its
+    equal share contributes everything it has, and the leftover target gets
+    spread across the remaining (larger) studies instead of going unused.
+
+    If the paradigm's true total is already <= target_trials, returns everything
+    unchanged (no subsampling at all) -- matches the per-study rule's "never pad
+    up" behavior."""
+    totals = {s: sum(_count_trials(r["text"]) for r in recs)
+              for s, recs in records_by_study.items()}
+    if sum(totals.values()) <= target_trials:
+        return [r for recs in records_by_study.values() for r in recs]
+
+    remaining_studies = sorted(totals, key=lambda s: totals[s])
+    remaining_target = target_trials
+    allocation = {}
+    for i, s in enumerate(remaining_studies):
+        share = remaining_target / (len(remaining_studies) - i)
+        take = min(totals[s], share)
+        allocation[s] = take
+        remaining_target -= take
+
+    out = []
+    for s, recs in records_by_study.items():
+        out.extend(_subsample_to_trial_count(recs, int(allocation[s]), seed=seed))
+    return out
+
+
+def _load_chunked_study(study: str) -> list[dict]:
+    """Raw records for one study, chunked but NOT trial-subsampled -- the input
+    _subsample_paradigm_equal/build_subsampled_corpus.py need, distinct from
+    load_all_records's default (which trial-subsamples per study first)."""
+    records = _read_records(study)
+    if study in CHUNK_CANDIDATES:
+        records = [c for r in records for c in _chunk_record(r)]
+    return records
+
+
+def build_paradigm_balanced_records(studies: list[str], seed: int = 100,
+                                     target_trials_per_paradigm: int = TARGET_TRIALS_PER_PARADIGM
+                                     ) -> list[dict]:
+    """Builds the training pool for leave-one-paradigm-out: pools `studies`
+    (already excluding the held-out paradigm's own studies), groups by paradigm,
+    applies _subsample_paradigm_equal to each paradigm group independently, then
+    concatenates. This is a separate, mutually exclusive pooling strategy from
+    load_all_records's default per-study 100k cap -- selected by which
+    leave-one-out mode is active in build_training_dataset.
+
+    If build_subsampled_corpus.py has already been run, loads directly from its
+    materialized subsampled_by_paradigm/<slug>.jsonl output per paradigm instead
+    of re-deriving live -- falls back to live computation otherwise."""
+    lookup = paradigm_lookup()
+    by_paradigm: dict[str, list[str]] = {}
+    for s in studies:
+        by_paradigm.setdefault(lookup.get(s, "unknown"), []).append(s)
+
+    out = []
+    for paradigm, paradigm_studies in by_paradigm.items():
+        cached_path = SUBSAMPLED_BY_PARADIGM_DIR / f"{_paradigm_slug(paradigm)}.jsonl"
+        if cached_path.is_file():
+            # cached_path holds the FULL paradigm's balanced subsample (built from
+            # every study in that paradigm); when this paradigm's studies are only
+            # a subset of `studies` (shouldn't normally happen -- a paradigm's
+            # studies are excluded as a whole -- but guard against it anyway),
+            # filter down to just the requested studies.
+            cached = _read_jsonl(cached_path)
+            out.extend(r for r in cached if r["experiment"] in paradigm_studies)
+        else:
+            records_by_study = {s: _load_chunked_study(s) for s in paradigm_studies}
+            out.extend(_subsample_paradigm_equal(records_by_study, target_trials_per_paradigm, seed=seed))
+    return out
 
 
 def leakage_safe_split(records: list[dict], test_frac: float = 0.10, seed: int = 100):
@@ -283,13 +441,21 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
     if cached_train is not None:
         return cached_train, _load_cached_dataset(eval_cache)
 
-    held_out = set(held_out_studies or [])
     if held_out_paradigm:
-        held_out |= set(studies_in_paradigm(held_out_paradigm))
-
-    pool_studies = [s for s in STUDIES if s not in held_out]
-    records = load_all_records(pool_studies, max_participants_per_study=max_participants_per_study,
-                                seed=seed)
+        held_out = set(studies_in_paradigm(held_out_paradigm))
+        pool_studies = [s for s in STUDIES if s not in held_out]
+        # Leave-one-PARADIGM-out: pool capped per-paradigm (500k trials, equal
+        # per-study within each remaining paradigm), NOT the per-study 100k cap --
+        # a separate, mutually exclusive pooling strategy from the study-out case.
+        records = build_paradigm_balanced_records(pool_studies, seed=seed)
+    else:
+        held_out = set(held_out_studies or [])
+        pool_studies = [s for s in STUDIES if s not in held_out]
+        # Leave-one-STUDY-out (and the no-held-out full-pool reference run):
+        # per-study 100k-trial cap applies by default (load_all_records's own
+        # default), plus max_participants_per_study for the smoke test if set.
+        records = load_all_records(pool_studies, max_participants_per_study=max_participants_per_study,
+                                    seed=seed)
 
     if inner_split:
         train_records, test_records = leakage_safe_split(records, seed=seed)
@@ -361,7 +527,31 @@ def build_held_out_dataset(held_out_studies: list[str] | None = None,
     # column -- but worth knowing if inspecting this dataset's `experiment` column
     # directly.
     paths = [_ensure_plain_jsonl(study) for study in held_out]
-    ds = load_dataset("json", data_files={"test": paths})["test"]
+    if len(paths) == 1:
+        ds = load_dataset("json", data_files={"test": paths})["test"]
+    else:
+        # Different studies' raw JSONL files carry different extra columns (rt,
+        # age, batch_no, gender, etc. vary by source study) -- a single
+        # load_dataset(..., data_files=[multiple files]) call tries to unify all
+        # files into one Arrow schema and fails on incompatible column types
+        # across files (confirmed: held_out_paradigm against a real multi-study
+        # paradigm, e.g. "lexical decision"'s 5 studies). Load each study's file
+        # separately, keep only the 3 columns actually used downstream, then
+        # concatenate -- sidesteps the cross-file schema-unification entirely.
+        parts = []
+        for path in paths:
+            part = load_dataset("json", data_files={"test": [path]})["test"]
+            part = part.select_columns(["text", "experiment", "participant_id"])
+            # participant_id's raw type also varies by source study (int64 vs
+            # string) -- normalize before concatenating, matching how every other
+            # participant_id use in this file already treats it as a string
+            # (e.g. build_training_dataset's _row(), _cap_participants). cast_column
+            # (not .map(), which doesn't reliably override Arrow's inferred schema
+            # type here) forces the actual stored feature type to string.
+            if part.features["participant_id"].dtype != "string":
+                part = part.cast_column("participant_id", Value("string"))
+            parts.append(part)
+        ds = concatenate_datasets(parts)
 
     if max_participants_per_study is not None:
         by_experiment: dict[str, set[str]] = {}

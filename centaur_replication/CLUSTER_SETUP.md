@@ -101,7 +101,33 @@ and overwritten each time, never touching a real run's output directory or addin
 rows to `results/all_runs_generalization.csv` that could be confused with real
 results.
 
-## 5. One leave-one-out run
+## 5. Build the subsampled corpus (run once before any real training)
+
+The pooled training corpus is heavily imbalanced by trial count -- one study
+alone (`lynott2020lancaster`) contributes over 10.6M individual response
+targets, while the smallest contributes under 3,000. `data_loader.py` now caps
+every study at 100k trials by default (leave-one-study-out) and every paradigm
+at 500k trials with equal-per-study sampling (leave-one-paradigm-out, a
+separate flow selected by setting `held_out_paradigm` instead of
+`held_out_study` in your config -- same script, same invocation, no other
+changes needed).
+
+This subsampling happens automatically either way, but running the
+materialization script once up front builds real, inspectable files instead of
+silently recomputing the subsample live on first use:
+
+```python
+!python centaur_replication/build_subsampled_corpus.py
+```
+
+This writes `centaur_replication/data/subsampled_by_study/<study>.jsonl` (28
+files), `subsampled_by_paradigm/<paradigm>.jsonl` (15 files), and a
+`subsampled_corpus_summary.csv` showing the before/after trial count for every
+study and paradigm -- worth a quick look to confirm the imbalance fix landed
+where you expect. Safe to re-run any time; fully deterministic (fixed seed),
+every output gets overwritten.
+
+## 6. One leave-one-out run
 
 Only proceed here after section 4's smoke test has printed PASS.
 
@@ -143,30 +169,55 @@ dies or the session times out, resume rather than restart from scratch:
 #   trainer.train(resume_from_checkpoint=True)   # picks up the latest checkpoint in output_dir
 ```
 
-## 6. Many leave-one-out runs in one kernel session
+## 7. Many leave-one-out runs, in parallel across all 4 GPUs
 
-If looping over multiple held-out studies/paradigms in the same notebook (rather
-than restarting the kernel each time), **the subprocess approach in step 4 is
-strongly preferred over importing and calling `centaur_finetune.main()` directly** --
-each `subprocess.run` gets a clean process and clean GPU memory; an in-process loop
-would need explicit `del model; torch.cuda.empty_cache()` between runs and is much
-easier to get subtly wrong (stale optimizer state, LoRA adapters stacking on top of
-each other, etc.).
+For running the full sweep (all 28 studies -> 28 fine-tuned models), use
+`run_full_sweep.py` rather than looping sequentially in a notebook: it splits
+`data_loader.STUDIES` round-robin into 4 groups (7 studies each, for the current
+28-study corpus) and runs each group on its own dedicated GPU, all 4 GPUs
+working in parallel -- no need to hand-launch one job per GPU yourself.
+
+This is deliberately **not** `torchrun`/DDP (4 independent single-GPU jobs
+instead) -- a genuine multi-GPU DDP attempt with Unsloth hung reliably in
+testing this session (`accelerate launch --multi_gpu`/`torchrun` both stalled
+indefinitely mid-startup); 4 independent single-GPU jobs is simpler, more
+robust, and gets the same aggregate 4x throughput for a sweep of many
+independent runs, which is what this actually is. Each individual job still
+uses the subprocess approach from step 6 internally (clean process, clean GPU
+memory per run -- no stale optimizer state or stacked LoRA adapters).
+
+For every study, after fine-tuning it also evaluates the freshly fine-tuned
+model, the real published Minitaur (zero-shot), and the untrained base Llama --
+all three against that same held-out study -- and computes all three pairwise
+delta log-likelihoods, exactly the comparisons you'd otherwise run by hand.
 
 ```python
-studies_to_run = ["balota2007_LDT", "marson2026_eplep", "kyroelaeinen2022_valence"]  # etc.
-
-for study in studies_to_run:
-    config["held_out_study"] = study
-    config["held_out_paradigm"] = None
-    config["output_dir"] = f"centaur_replication/runs/loo_{study}"
-    path = f"centaur_replication/runs/loo_{study}_config.json"
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
-    subprocess.run(["python", "centaur_replication/centaur_finetune.py", path], check=True)
+!python centaur_replication/run_full_sweep.py
 ```
 
-## 7. Evaluation, after a run finishes
+This launches all 4 GPU workers as background processes and returns
+immediately -- it does not block the notebook. Check progress with:
+
+```python
+!tail -n 30 centaur_replication/runs/sweep_gpu0.log centaur_replication/runs/sweep_gpu1.log \
+             centaur_replication/runs/sweep_gpu2.log centaur_replication/runs/sweep_gpu3.log
+```
+
+**Resumable**: if a worker (or the whole session) dies partway through, just
+re-run the same command -- it skips any study whose checkpoint already exists
+and any evaluation already recorded in
+`results/all_runs_generalization.csv`, so nothing gets redone.
+
+To run only a subset of studies instead of the full 28, or to change how many
+GPUs are used, edit `NUM_GPUS`/`BASE_MODEL`/`MINITAUR_MODEL` at the top of
+`run_full_sweep.py`, or invoke one GPU's queue directly for a manual subset:
+
+```python
+!python centaur_replication/run_full_sweep.py --worker --gpu 0 \
+    --studies balota2007_LDT,marson2026_eplep,kyroelaeinen2022_valence
+```
+
+## 8. Evaluation, after a run finishes
 
 **Note on reloading a saved checkpoint — not independently verified this session,
 flagging rather than asserting**: `trainer.save_model()` saves the LoRA *adapter*
@@ -202,7 +253,7 @@ eval_loss, per_study = centaur_eval.run_evaluation(
 ```
 Results land in `centaur_replication/results/loo_balota2007_LDT_*.csv`.
 
-## 8. If disk space on the cluster is tight
+## 9. If disk space on the cluster is tight
 
 Each run's checkpoint directory is small (LoRA adapters only, tens of MB — not full
 model weights), but `--save_steps 100` across ~6,600 steps means ~66 checkpoints per
