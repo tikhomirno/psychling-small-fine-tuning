@@ -197,6 +197,12 @@ def _write_jsonl(path: Path, records: list[dict]):
             fh.write(json.dumps(r) + "\n")
 
 
+# Bump this manually if the *shape* of the subsampling logic changes (e.g. the
+# redistribution algorithm) without either TARGET_TRIALS_* constant changing --
+# included in build_training_dataset's cache key so a stale on-disk cache from
+# an older subsampling policy can never be silently reused for a new one.
+SUBSAMPLING_VERSION = 1
+
 TARGET_TRIALS_PER_STUDY = 100_000
 SUBSAMPLED_BY_STUDY_DIR = DATA_CACHE / "subsampled_by_study"
 
@@ -433,8 +439,19 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
     centaur_finetune.py) so only rank 0 pays that cost and the other ranks hit
     this cache instead of redoing it in parallel.
     """
+    # TARGET_TRIALS_PER_STUDY/TARGET_TRIALS_PER_PARADIGM are included so a cache
+    # built under a different subsampling policy (e.g. before this trial-count
+    # cap existed at all, or after tuning the target) can never be silently
+    # reused -- confirmed this session: a stale pre-subsampling cache for
+    # hilton2021_comprehension got reused after the cap was added, since the key
+    # didn't depend on it, producing a real training run on the wrong
+    # (unsubsampled, 41,061-sequence) pool. Bump SUBSAMPLING_VERSION manually if
+    # the *shape* of the subsampling logic itself ever changes without changing
+    # either constant (e.g. redistribution algorithm tweaks).
     key = _dataset_cache_key("train", sorted(held_out_studies or []), held_out_paradigm,
-                              inner_split, seed, max_participants_per_study)
+                              inner_split, seed, max_participants_per_study,
+                              TARGET_TRIALS_PER_STUDY, TARGET_TRIALS_PER_PARADIGM,
+                              SUBSAMPLING_VERSION)
     train_cache = DATA_CACHE / f"train_{key}"
     eval_cache = DATA_CACHE / f"eval_{key}"
     cached_train = _load_cached_dataset(train_cache)
