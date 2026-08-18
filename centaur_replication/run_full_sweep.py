@@ -71,18 +71,28 @@ def _run_subprocess(cmd: list[str], gpu: int, log_path: Path) -> bool:
     return result.returncode == 0
 
 
-def _checkpoint_exists(study: str) -> bool:
-    return (RUNS_DIR / f"loo_{study}" / "adapter_model.safetensors").is_file()
+def _run_name(study: str, output_suffix: str) -> str:
+    """Base name used for this study's output_dir/adapter_dir/config path/eval
+    run_labels -- 'loo_{study}' by default, or 'loo_{study}{output_suffix}' when
+    running a second, distinctly-named variant of a study that must never
+    collide with an existing run's files (e.g. a corrected-pool comparison
+    against a study that's already training elsewhere with the old pool)."""
+    return f"loo_{study}{output_suffix}"
 
 
-def _build_config(study: str) -> Path:
+def _checkpoint_exists(study: str, output_suffix: str = "") -> bool:
+    return (RUNS_DIR / _run_name(study, output_suffix) / "adapter_model.safetensors").is_file()
+
+
+def _build_config(study: str, output_suffix: str = "") -> Path:
+    name = _run_name(study, output_suffix)
     with open(ROOT / "centaur_config.json") as f:
         config = json.load(f)
     config["held_out_study"] = study
     config["held_out_paradigm"] = None
-    config["output_dir"] = str(RUNS_DIR / f"loo_{study}")
+    config["output_dir"] = str(RUNS_DIR / name)
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    path = RUNS_DIR / f"loo_{study}_config.json"
+    path = RUNS_DIR / f"{name}_config.json"
     with open(path, "w") as f:
         json.dump(config, f, indent=2)
     return path
@@ -124,19 +134,21 @@ def check_held_out_correctness(studies: list[str]) -> bool:
     return all_ok
 
 
-def run_worker(gpu: int, studies: list[str]):
+def run_worker(gpu: int, studies: list[str], output_suffix: str = ""):
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = RUNS_DIR / f"sweep_gpu{gpu}.log"
-    _log(log_path, f"=== worker for GPU {gpu}: {len(studies)} studies: {studies} ===")
+    _log(log_path, f"=== worker for GPU {gpu}: {len(studies)} studies: {studies} "
+                    f"(output_suffix={output_suffix!r}) ===")
 
     for study in studies:
         _log(log_path, f"\n--- {study} ---")
-        adapter_dir = str(RUNS_DIR / f"loo_{study}")
+        name = _run_name(study, output_suffix)
+        adapter_dir = str(RUNS_DIR / name)
 
-        if _checkpoint_exists(study):
+        if _checkpoint_exists(study, output_suffix):
             _log(log_path, "  checkpoint already exists, skipping training")
         else:
-            config_path = _build_config(study)
+            config_path = _build_config(study, output_suffix)
             ok = _run_subprocess(
                 [sys.executable, str(ROOT / "centaur_finetune.py"), str(config_path)],
                 gpu, log_path)
@@ -144,12 +156,15 @@ def run_worker(gpu: int, studies: list[str]):
                 _log(log_path, f"  TRAINING FAILED for {study}, skipping its evals")
                 continue
 
+        # eval run_labels also carry the suffix -- otherwise a second, corrected
+        # variant of an already-evaluated study would be silently skipped by
+        # already_evaluated() thinking the original run's eval already covers it.
         _run_eval(study, BASE_MODEL, centaur_eval.MODEL_OURS, adapter_dir,
-                  f"loo_{study}", gpu, log_path)
+                  name, gpu, log_path)
         _run_eval(study, BASE_MODEL, centaur_eval.MODEL_BASE, None,
-                  f"base_{study}", gpu, log_path)
+                  f"base_{study}{output_suffix}", gpu, log_path)
         _run_eval(study, MINITAUR_MODEL, centaur_eval.MODEL_MINITAUR, None,
-                  f"minitaur_{study}", gpu, log_path)
+                  f"minitaur_{study}{output_suffix}", gpu, log_path)
 
         for model_a, model_b in [
             (centaur_eval.MODEL_MINITAUR, centaur_eval.MODEL_OURS),
@@ -173,6 +188,15 @@ def main():
     parser.add_argument("--gpu-ids", default=None,
                          help="comma-separated physical GPU ids to use, e.g. '1,2,3' if GPU 0 "
                               "is already busy with something else. Default: all 4 (0,1,2,3).")
+    parser.add_argument("--exclude-studies", default=None,
+                         help="comma-separated studies to skip entirely -- e.g. a study that's "
+                              "already training elsewhere under the old pool, so this sweep "
+                              "doesn't also try to write to its output_dir")
+    parser.add_argument("--output-suffix", default="",
+                         help="appended to every run's output_dir/adapter_dir/config path/eval "
+                              "run_label (e.g. '_subsampled') -- use when running a second, "
+                              "distinctly-named variant of a study that must not collide with "
+                              "an existing run's files")
     parser.add_argument("--check-held-out", action="store_true",
                          help="fast, GPU-free correctness check across --studies (default: all "
                               "28) -- confirms each study's pool excludes it and its held-out "
@@ -188,12 +212,15 @@ def main():
         sys.exit(0 if ok else 1)
 
     if args.worker:
-        run_worker(args.gpu, studies_arg)
+        run_worker(args.gpu, studies_arg, output_suffix=args.output_suffix)
         return
 
+    exclude = set(args.exclude_studies.split(",")) if args.exclude_studies else set()
+    pool = [s for s in dl.STUDIES if s not in exclude]
     gpu_ids = [int(g) for g in args.gpu_ids.split(",")] if args.gpu_ids else list(range(NUM_GPUS))
-    groups = [dl.STUDIES[i::len(gpu_ids)] for i in range(len(gpu_ids))]
-    print(f"splitting {len(dl.STUDIES)} studies across {len(gpu_ids)} GPUs {gpu_ids}:")
+    groups = [pool[i::len(gpu_ids)] for i in range(len(gpu_ids))]
+    print(f"splitting {len(pool)} studies ({len(exclude)} excluded: {exclude or 'none'}) "
+          f"across {len(gpu_ids)} GPUs {gpu_ids}:")
     for gpu, studies in zip(gpu_ids, groups):
         print(f"  GPU {gpu}: {len(studies)} studies: {studies}")
 
@@ -203,6 +230,8 @@ def main():
         log_path = RUNS_DIR / f"sweep_gpu{gpu}.log"
         cmd = [sys.executable, str(Path(__file__).resolve()),
                "--worker", "--gpu", str(gpu), "--studies", ",".join(studies)]
+        if args.output_suffix:
+            cmd += ["--output-suffix", args.output_suffix]
         proc = subprocess.Popen(cmd)
         procs.append(proc)
         print(f"launched GPU {gpu} worker, pid {proc.pid}, log: {log_path}")
