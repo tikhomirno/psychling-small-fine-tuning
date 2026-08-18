@@ -17,19 +17,27 @@ output_dir, then:
     python centaur_finetune.py loo_balota2007_LDT_config.json
 
 centaur_config.json's values match scripts/cluster_train.sh exactly (verified this
-session), with two deliberate exceptions: model_name_or_path is our own
+session), with three deliberate exceptions: model_name_or_path is our own
 unsloth/Meta-Llama-3.1-8B-bnb-4bit (matching Minitaur, per this session's earlier
-decision), not cluster_train.sh's literal 70B path; and num_train_epochs is set to
+decision), not cluster_train.sh's literal 70B path; num_train_epochs is set to
 1 (matching the paper's own methods-text description), not the real script's
 literal 5 -- see FINETUNING_PLAN_CENTAUR_REPLICATION.md for that discrepancy.
 5 epochs is what the real code does and is the more literal replication, but for
 a 28-study sweep the wall-clock cost multiplies accordingly (measured this
 session: ~5x), so 1 epoch is the deliberate default here for tractability -- pass
 num_train_epochs=5 explicitly in a run's own config if literal recipe fidelity
-matters more than sweep turnaround time for a specific run. A plain CLI-flags
-invocation also works (HfArgumentParser), but skips the config file's guarantee
-that every value matches this session's chosen recipe rather than falling back
-to a generic HF default.
+matters more than sweep turnaround time for a specific run; and
+gradient_accumulation_steps is set to 8, not the real script's literal 32 (i.e.
+effective batch 8, not 32) -- with only 1 epoch, the subsampled ~6-7k-example
+pool gives ~200 optimizer updates at effective batch 32, judged too few for the
+LoRA adapter to meaningfully update; dropping to 8 gives ~4x more updates for
+the SAME wall-clock time (grad_accum only changes how forward/backward passes
+group into weight updates, not how many total passes happen -- a genuinely free
+lever, unlike epochs), at the cost of noisier per-step gradients from the
+smaller effective batch. A plain CLI-flags invocation also works
+(HfArgumentParser), but skips the config file's guarantee that every value
+matches this session's chosen recipe rather than falling back to a generic HF
+default.
 """
 import sys
 from dataclasses import dataclass, field
