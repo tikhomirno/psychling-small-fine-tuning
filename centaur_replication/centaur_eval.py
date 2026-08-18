@@ -221,7 +221,15 @@ def _save_item_nlls(run_label: str, per_record: list[dict]) -> "pd.DataFrame":
         for i, nll in enumerate(r["item_nlls"]):
             rows.append({"experiment": r["experiment"], "participant_id": r["participant_id"],
                          "item_index": i, "nll": nll})
-    df = pd.DataFrame(rows)
+    # pd.DataFrame([]) has zero columns (nothing to infer them from), which makes
+    # any later df["nll"] access raise KeyError instead of returning an empty
+    # Series -- confirmed this session: every record for a held-out study can
+    # come back with an empty item_nlls list (the completion-only collator found
+    # no matching response spans at all, for reasons independent of the data's
+    # own well-formedness), so this is a real, not just theoretical, case to
+    # handle. Always declare the columns explicitly so a 0-row result is just
+    # empty, never malformed.
+    df = pd.DataFrame(rows, columns=["experiment", "participant_id", "item_index", "nll"])
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     df.to_csv(RESULTS_DIR / f"{run_label}_item_nlls.csv", index=False)
     return df
@@ -271,6 +279,13 @@ def run_evaluation(model, tokenizer, collator, held_out_studies=None,
         fh.write(f"{eval_loss}\n")
 
     all_nlls = item_df["nll"].tolist()
+    if not all_nlls:
+        print(f"WARNING: 0 items extracted for run_label={run_label!r} -- the "
+              f"completion-only collator found no matching response spans in any "
+              f"record of this held-out set. Recording eval_loss/n_items=0 anyway "
+              f"so this doesn't silently vanish from the master table, but "
+              f"mean/sem are None and this run's delta comparisons will be "
+              f"unavailable until the underlying cause is fixed.")
     mean_nll = sum(all_nlls) / len(all_nlls) if all_nlls else None
     sem_nll = (pd_series_sem(all_nlls) if all_nlls else None)
     _append_master_row({
