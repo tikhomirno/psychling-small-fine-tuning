@@ -160,14 +160,12 @@ instead of via `subprocess.run`.
 
 **Long-running**: this is ~6,600 optimizer steps at 5 epochs for a typical
 leave-one-out pool (`FINETUNING_PLAN_CENTAUR_REPLICATION.md` §5) — likely hours, not
-minutes. `--save_steps 100` checkpoints every 100 steps regardless, so if the kernel
-dies or the session times out, resume rather than restart from scratch:
-```python
-# in centaur_finetune.py's main(), change:
-#   trainer.train(resume_from_checkpoint=None)
-# to:
-#   trainer.train(resume_from_checkpoint=True)   # picks up the latest checkpoint in output_dir
-```
+minutes. `--save_steps 100` checkpoints every 100 steps regardless, and
+`centaur_finetune.py` auto-resumes from the latest checkpoint in `output_dir` if
+one already exists there (no manual edit needed) -- so if the kernel dies, the
+session times out, or you kill it yourself, just rerun the exact same command
+(or the same `run_full_sweep.py` invocation) and it picks up where it left off
+instead of retraining from scratch.
 
 ## 7. Many leave-one-out runs, in parallel across all 4 GPUs
 

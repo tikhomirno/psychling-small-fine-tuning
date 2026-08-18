@@ -182,7 +182,17 @@ def main():
             output_dir=training_args.output_dir,
         ),
     )
-    trainer.train(resume_from_checkpoint=None)
+    # Auto-resume if this output_dir already has a periodic checkpoint (e.g. the
+    # job was killed/died partway through) -- resume_from_checkpoint=True makes
+    # HF Trainer find and load the latest checkpoint-N/ in output_dir itself, no
+    # path needed. A fresh output_dir (no checkpoints yet) trains from scratch as
+    # before. This was previously hardcoded to None (never resume) with a manual
+    # "edit this line to True" note in CLUSTER_SETUP.md -- automated instead,
+    # since restarting a killed multi-hour run from scratch wastes real GPU time
+    # for no reason when a perfectly good checkpoint already exists on disk.
+    output_dir = Path(training_args.output_dir)
+    has_checkpoint = output_dir.is_dir() and any(output_dir.glob("checkpoint-*"))
+    trainer.train(resume_from_checkpoint=has_checkpoint if has_checkpoint else None)
     trainer.save_model()
 
 
