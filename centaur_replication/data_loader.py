@@ -549,7 +549,9 @@ def _ensure_plain_jsonl(study: str) -> str:
 
 def build_held_out_dataset(held_out_studies: list[str] | None = None,
                             held_out_paradigm: str | None = None,
-                            max_participants_per_study: int | None = None):
+                            max_participants_per_study: int | None = None,
+                            target_trials_per_study: int | None = TARGET_TRIALS_PER_STUDY,
+                            seed: int = 100):
     """Loads the held-out generalization test set from real, on-disk file paths
     (via _ensure_plain_jsonl) -- not records re-serialized from Python -- keeping
     the spirit of generalization.py's real-file-based loading.
@@ -567,6 +569,18 @@ def build_held_out_dataset(held_out_studies: list[str] | None = None,
     consistency in columns we don't even use, so extracting only the 3 needed
     columns this way sidesteps both failure modes at the root rather than
     patching each one as it's discovered.
+
+    `target_trials_per_study` defaults to the same TARGET_TRIALS_PER_STUDY cap
+    used for the training pool (100k trials) -- held-out sets were originally
+    left fully unsubsampled, but for the largest studies (e.g.
+    balota2007_LDT's 2,744,578 held-out items) that made evaluation itself take
+    as long as or longer than training, confirmed this session via
+    run_full_sweep.py --audit. Pass None for a deliberate full-data evaluation
+    (mirrors build_training_dataset's disable_subsampling escape hatch).
+    Applied per study via the same _subsample_to_trial_count helper the
+    training side already uses, before max_participants_per_study (below) --
+    the two caps compose fine since a smoke test's 1-participant cap is always
+    far more restrictive than 100k trials regardless of order.
 
     `max_participants_per_study` is None for every real run -- pass an int (e.g. 1)
     only for a tiny cluster smoke test (see cluster_smoke_test.py). Applied as a
@@ -587,10 +601,15 @@ def build_held_out_dataset(held_out_studies: list[str] | None = None,
     # directly.
     paths = [_ensure_plain_jsonl(study) for study in held_out]
     rows = []
-    for path in paths:
-        for r in _read_jsonl(Path(path)):
-            rows.append({"text": r["text"], "experiment": r["experiment"],
-                         "participant_id": str(r.get("participant_id", r.get("participant")))})
+    for study, path in zip(held_out, paths):
+        study_rows = [
+            {"text": r["text"], "experiment": r["experiment"],
+             "participant_id": str(r.get("participant_id", r.get("participant")))}
+            for r in _read_jsonl(Path(path))
+        ]
+        if target_trials_per_study is not None:
+            study_rows = _subsample_to_trial_count(study_rows, target_trials_per_study, seed=seed)
+        rows.extend(study_rows)
     ds = Dataset.from_list(rows)
 
     if max_participants_per_study is not None:

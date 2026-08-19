@@ -238,7 +238,8 @@ def _save_item_nlls(run_label: str, per_record: list[dict]) -> "pd.DataFrame":
 def run_evaluation(model, tokenizer, collator, held_out_studies=None,
                     held_out_paradigm=None, run_label: str = "run",
                     model_name: str = MODEL_OURS, device="cpu", max_length: int = None,
-                    max_participants_per_study: int = None):
+                    max_participants_per_study: int = None,
+                    target_trials_per_study: int = dl.TARGET_TRIALS_PER_STUDY):
     """Convenience entry point: loads the held-out set, computes both metrics,
     writes per-run detail to centaur_replication/results/<run_label>_*.csv
     (including the full per-item NLL list, needed for paired delta computation
@@ -261,10 +262,17 @@ def run_evaluation(model, tokenizer, collator, held_out_studies=None,
     `max_participants_per_study` is None for every real evaluation -- pass an int
     (e.g. 1) only for a tiny cluster smoke test (see cluster_smoke_test.py), so the
     held-out set stays as small as the training pool it's paired with.
+
+    `target_trials_per_study` defaults to dl.TARGET_TRIALS_PER_STUDY (100k) --
+    held-out sets are now capped the same way training pools are (evaluation on
+    the largest studies was taking as long as or longer than training itself,
+    confirmed via run_full_sweep.py --audit). Pass None for a deliberate
+    full-data evaluation.
     """
     held_out_dataset = dl.build_held_out_dataset(
         held_out_studies=held_out_studies, held_out_paradigm=held_out_paradigm,
-        max_participants_per_study=max_participants_per_study)
+        max_participants_per_study=max_participants_per_study,
+        target_trials_per_study=target_trials_per_study)
 
     eval_loss = compute_eval_loss(model, tokenizer, held_out_dataset, collator,
                                    max_length=max_length, device=device)
