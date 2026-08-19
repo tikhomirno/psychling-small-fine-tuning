@@ -26,6 +26,7 @@ Usage:
     python run_full_sweep.py                        # launches workers on all 4 GPUs, exits
     python run_full_sweep.py --gpu-ids 1,2,3         # launches workers on GPUs 1,2,3 only
     python run_full_sweep.py --check-held-out        # fast, GPU-free correctness check (see below)
+    python run_full_sweep.py --audit                 # fast, GPU-free per-study status report (see below)
     python run_full_sweep.py --worker --gpu 2 --studies s1,s2,...   # (internal)
 
 Check progress: tail -f runs/sweep_gpu*.log
@@ -39,6 +40,18 @@ doing (see CLUSTER_SETUP.md section 7 for the full walkthrough):
 2. A real, small mechanics check on one GPU with 1-2 studies (needs a real
    GPU/Unsloth, takes as long as one real training run) -- run the worker
    directly with a tiny --studies list before committing to the full sweep.
+
+After (or partway through) a real sweep, `--audit` is the trustworthy way to
+check real progress -- it reads only on-disk checkpoints and the master
+results table, never the sweep logs (`runs/sweep_gpu*.log` are cumulative
+across every kill/relaunch and can look misleading on their own). Confirmed
+this session as a real, recurring failure mode: `pkill`-ing a
+`run_full_sweep.py --worker` process does NOT kill its child
+`centaur_finetune.py`/`eval_one_model.py` subprocess -- if a worker dies mid-
+queue, its orphaned child can finish training completely normally (a real
+checkpoint appears) with nothing left alive afterward to run the evaluation
+step that was supposed to follow it. `--audit` catches exactly this:
+`TRAINED_NOT_EVALUATED` means a checkpoint exists but no eval row does.
 """
 import argparse
 import json
@@ -134,6 +147,56 @@ def check_held_out_correctness(studies: list[str]) -> bool:
     return all_ok
 
 
+def audit_sweep(studies: list[str]) -> bool:
+    """GPU-free audit: for each study, cross-references three independent
+    sources of truth -- (1) whether a checkpoint exists on disk, (2) whether
+    base/minitaur/ours eval rows exist in the master results table, (3)
+    whether a delta comparison was computed -- and reports a clear per-study
+    status. Doesn't touch or trust the sweep logs at all (those are cumulative
+    across every kill/relaunch this session and unreliable on their own) --
+    this only reads real, current on-disk state. Returns whether every study
+    is COMPLETE."""
+    import pandas as pd
+
+    results = (pd.read_csv(centaur_eval.MASTER_RESULTS_CSV)
+               if centaur_eval.MASTER_RESULTS_CSV.exists() else pd.DataFrame())
+
+    rows = []
+    for study in studies:
+        has_checkpoint = _checkpoint_exists(study)
+        evaluated = {}
+        for label, model_name in [("ours", centaur_eval.MODEL_OURS),
+                                   ("base", centaur_eval.MODEL_BASE),
+                                   ("minitaur", centaur_eval.MODEL_MINITAUR)]:
+            evaluated[label] = not results.empty and bool((
+                (results["model_name"] == model_name) & (results["held_out_name"] == study)
+            ).any())
+        delta_path = centaur_eval.RESULTS_DIR / f"delta_minitaur_vs_ours__{study}_overall.csv"
+        rows.append({"study": study, "checkpoint": has_checkpoint, "eval": evaluated,
+                     "delta_computed": delta_path.is_file()})
+
+    counts = {}
+    for r in rows:
+        vals = list(r["eval"].values())
+        if r["checkpoint"] and all(vals) and r["delta_computed"]:
+            status = "COMPLETE"
+        elif r["checkpoint"] and not any(vals):
+            status = "TRAINED_NOT_EVALUATED"
+        elif r["checkpoint"]:
+            status = "PARTIALLY_EVALUATED"
+        else:
+            status = "NOT_TRAINED"
+        counts[status] = counts.get(status, 0) + 1
+        detail = ", ".join(f"{k}={'Y' if v else 'n'}" for k, v in r["eval"].items())
+        print(f"  [{status:<22}] {r['study']:<40} ckpt={'Y' if r['checkpoint'] else 'n'} "
+              f"{detail} delta={'Y' if r['delta_computed'] else 'n'}")
+
+    print(f"\n--- summary ({len(studies)} studies) ---")
+    for status in ["COMPLETE", "TRAINED_NOT_EVALUATED", "PARTIALLY_EVALUATED", "NOT_TRAINED"]:
+        print(f"  {status}: {counts.get(status, 0)}")
+    return counts.get("COMPLETE", 0) == len(studies)
+
+
 def run_worker(gpu: int, studies: list[str], output_suffix: str = ""):
     RUNS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = RUNS_DIR / f"sweep_gpu{gpu}.log"
@@ -201,6 +264,12 @@ def main():
                          help="fast, GPU-free correctness check across --studies (default: all "
                               "28) -- confirms each study's pool excludes it and its held-out "
                               "set is present, then exits without launching anything")
+    parser.add_argument("--audit", action="store_true",
+                         help="fast, GPU-free per-study status report across --studies (default: "
+                              "all) -- cross-references checkpoints on disk against eval rows in "
+                              "the master results table and delta CSVs, independent of (and more "
+                              "trustworthy than) the cumulative sweep logs. Reports COMPLETE / "
+                              "TRAINED_NOT_EVALUATED / PARTIALLY_EVALUATED / NOT_TRAINED per study.")
     args = parser.parse_args()
 
     studies_arg = args.studies.split(",") if args.studies else dl.STUDIES
@@ -209,6 +278,11 @@ def main():
         print(f"checking held-out correctness for {len(studies_arg)} studies...")
         ok = check_held_out_correctness(studies_arg)
         print(f"\n{'ALL PASS' if ok else 'SOME FAILED -- see above'}")
+        sys.exit(0 if ok else 1)
+
+    if args.audit:
+        print(f"auditing {len(studies_arg)} studies...")
+        ok = audit_sweep(studies_arg)
         sys.exit(0 if ok else 1)
 
     if args.worker:
