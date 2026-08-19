@@ -28,9 +28,13 @@ DATA_CACHE = Path(__file__).resolve().parent / "data"
 CHARS_PER_TOKEN = 4  # this repo's established rule-of-thumb (stats_plots.ipynb)
 MAX_SEQ_TOKENS = 32768  # Centaur's literal cap, DataTrainingArguments.max_seq_length
 
-# The 28 English, no-image studies established in DATA_OVERVIEW_LEAVE_ONE_OUT.md §5.
+# The 27 English, no-image studies established in DATA_OVERVIEW_LEAVE_ONE_OUT.md §5,
+# minus Leivada2020_manipulativeDiscourse -- removed this session after a full
+# non-Latin-script scan confirmed it's the only study with substantial non-English
+# (Greek) stimuli text, which was also causing a real collator/tokenizer-boundary
+# crash during evaluation (KeyError: 'nll' from zero extracted response items).
 STUDIES = [
-    "Dymarska2025_associations", "Leivada2020_manipulativeDiscourse", "balota2007_LDT",
+    "Dymarska2025_associations", "balota2007_LDT",
     "balota2007_naming", "brysbaert2014_Concreteness", "devardaetal2024_cloze",
     "devardaetal2024_rating", "frank2013_reading", "futrell2021_corpus",
     "guenther2020LDT", "guenther2020TS", "guenther2022relational", "guenther2023ViSpa",
@@ -455,11 +459,16 @@ def build_training_dataset(held_out_studies: list[str] | None = None,
     # didn't depend on it, producing a real training run on the wrong
     # (unsubsampled, 41,061-sequence) pool. Bump SUBSAMPLING_VERSION manually if
     # the *shape* of the subsampling logic itself ever changes without changing
-    # either constant (e.g. redistribution algorithm tweaks).
+    # either constant (e.g. redistribution algorithm tweaks). STUDIES itself is
+    # also included (sorted, so order doesn't matter) so that removing/adding a
+    # study (e.g. Leivada2020_manipulativeDiscourse, dropped this session for
+    # non-English content) automatically invalidates any cache built under the
+    # old study list, instead of repeating the exact same class of staleness bug
+    # a second time.
     key = _dataset_cache_key("train", sorted(held_out_studies or []), held_out_paradigm,
                               inner_split, seed, max_participants_per_study,
                               TARGET_TRIALS_PER_STUDY, TARGET_TRIALS_PER_PARADIGM,
-                              SUBSAMPLING_VERSION, disable_subsampling)
+                              SUBSAMPLING_VERSION, disable_subsampling, sorted(STUDIES))
     train_cache = DATA_CACHE / f"train_{key}"
     eval_cache = DATA_CACHE / f"eval_{key}"
     cached_train = _load_cached_dataset(train_cache)
