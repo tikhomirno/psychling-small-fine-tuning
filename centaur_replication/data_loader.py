@@ -577,10 +577,23 @@ def build_held_out_dataset(held_out_studies: list[str] | None = None,
     as long as or longer than training, confirmed this session via
     run_full_sweep.py --audit. Pass None for a deliberate full-data evaluation
     (mirrors build_training_dataset's disable_subsampling escape hatch).
-    Applied per study via the same _subsample_to_trial_count helper the
-    training side already uses, before max_participants_per_study (below) --
-    the two caps compose fine since a smoke test's 1-participant cap is always
-    far more restrictive than 100k trials regardless of order.
+
+    At the default target, this reads directly from the same materialized
+    files load_all_records/build_paradigm_balanced_records already prefer
+    (SUBSAMPLED_BY_STUDY_DIR/SUBSAMPLED_BY_PARADIGM_DIR, built once by
+    build_subsampled_corpus.py) instead of re-deriving its own subsample from
+    raw JSONL -- guarantees the held-out set for study/paradigm X is the
+    EXACT SAME rows used whenever X sits inside some other model's training
+    pool, not just a same-seed-hopefully-same-result re-sample (confirmed
+    those could diverge: the raw-JSONL path skipped the chunking step
+    _load_chunked_study applies for futrell2021_corpus/marson2026_eplep
+    before subsampling, so the record list being shuffled had a different
+    length than the training side's even with a matching seed). Falls back
+    to live re-derivation (raw file + _subsample_to_trial_count/
+    _subsample_paradigm_equal, seed=100) only when the materialized file
+    doesn't exist yet (fresh clone) or target_trials_per_study isn't the
+    default (e.g. None for full-data eval) -- same fallback shape
+    load_all_records already uses.
 
     `max_participants_per_study` is None for every real run -- pass an int (e.g. 1)
     only for a tiny cluster smoke test (see cluster_smoke_test.py). Applied as a
@@ -589,27 +602,43 @@ def build_held_out_dataset(held_out_studies: list[str] | None = None,
     load_all_records/_cap_participants -- that would break the real-file-path
     parity with generalization.py this function is built to preserve.
     """
-    held_out = list(held_out_studies or [])
+    use_default_target = target_trials_per_study == TARGET_TRIALS_PER_STUDY
+
+    def _row(r):
+        return {"text": r["text"], "experiment": r["experiment"],
+                "participant_id": str(r.get("participant_id", r.get("participant")))}
+
     if held_out_paradigm:
         held_out = studies_in_paradigm(held_out_paradigm)
-
-    # Note: unlike our normalized prompts_fixed.jsonl, an unfixed study's original
-    # `experiment` field may carry a raw sub-task-suffixed value (e.g.
-    # "balota2007_LDT_exp1") rather than the plain study name. Harmless here --
-    # callers identify the held-out set by `held_out` itself, not by parsing this
-    # column -- but worth knowing if inspecting this dataset's `experiment` column
-    # directly.
-    paths = [_ensure_plain_jsonl(study) for study in held_out]
-    rows = []
-    for study, path in zip(held_out, paths):
-        study_rows = [
-            {"text": r["text"], "experiment": r["experiment"],
-             "participant_id": str(r.get("participant_id", r.get("participant")))}
-            for r in _read_jsonl(Path(path))
-        ]
-        if target_trials_per_study is not None:
-            study_rows = _subsample_to_trial_count(study_rows, target_trials_per_study, seed=seed)
-        rows.extend(study_rows)
+        cached_path = SUBSAMPLED_BY_PARADIGM_DIR / f"{_paradigm_slug(held_out_paradigm)}.jsonl"
+        if use_default_target and cached_path.is_file():
+            rows = [_row(r) for r in _read_jsonl(cached_path)]
+        else:
+            records_by_study = {
+                study: [_row(r) for r in _read_jsonl(Path(_ensure_plain_jsonl(study)))]
+                for study in held_out
+            }
+            rows = (_subsample_paradigm_equal(records_by_study, TARGET_TRIALS_PER_PARADIGM, seed=seed)
+                    if target_trials_per_study is not None
+                    else [r for recs in records_by_study.values() for r in recs])
+    else:
+        # Note: unlike our normalized prompts_fixed.jsonl, an unfixed study's
+        # original `experiment` field may carry a raw sub-task-suffixed value
+        # (e.g. "balota2007_LDT_exp1") rather than the plain study name.
+        # Harmless here -- callers identify the held-out set by `held_out`
+        # itself, not by parsing this column -- but worth knowing if
+        # inspecting this dataset's `experiment` column directly.
+        held_out = list(held_out_studies or [])
+        rows = []
+        for study in held_out:
+            cached_path = SUBSAMPLED_BY_STUDY_DIR / f"{study}.jsonl"
+            if use_default_target and cached_path.is_file():
+                rows.extend(_row(r) for r in _read_jsonl(cached_path))
+                continue
+            study_rows = [_row(r) for r in _read_jsonl(Path(_ensure_plain_jsonl(study)))]
+            if target_trials_per_study is not None:
+                study_rows = _subsample_to_trial_count(study_rows, target_trials_per_study, seed=seed)
+            rows.extend(study_rows)
     ds = Dataset.from_list(rows)
 
     if max_participants_per_study is not None:
