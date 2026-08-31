@@ -42,9 +42,9 @@ STUDIES = [
     "guenther2024comprehension", "guenther2024substitutions", "hilton2021_comprehension",
     "hutchison2013_semantic", "keuleers2011_britishlexiconproject",
     "kyroelaeinen2022_valence", "lynott2020lancaster", "marson2026_eplep",
-    "pexman2016_calgary", "pissani2026_metaphor", "schiekiera2026_pwi_en",
+    "pexman2016_calgary", "pissani2026_metaphor",
     "stella2026_formamentis_data", "tsaregorodtseva2026_mousetracking",
-]
+]  # schiekiera2026_pwi_en dropped for now (26 studies) -- data files untouched on disk
 
 # Studies whose real sequences can exceed MAX_SEQ_TOKENS after the session-collapsing
 # fix in PROMPT_CLEANING_FIXES.md -- confirmed by direct measurement, not assumed.
