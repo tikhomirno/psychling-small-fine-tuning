@@ -84,15 +84,19 @@ def chunk_record(record: dict) -> list[dict]:
     return out
 
 # The 7 studies RESPONSE_BOUNDARY_FIXES.md fixed -- these are the ones that
-# must come back 100.0000% for this to count as proof the fix took.
+# must come back 100.0000% for this to count as proof the fix took. Each maps
+# to the study's PREFERRED base filename (without extension) -- actual file
+# found on disk via find_prompts_path below, which tries plain .jsonl first,
+# then .jsonl.zip (package_for_cluster.sh always zips for the cluster bundle,
+# while a local checkout may have either).
 FIXED_STUDIES = {
-    "devardaetal2024_cloze": "prompts_fixed.jsonl",
-    "devardaetal2024_rating": "prompts_fixed.jsonl",
-    "lynott2020lancaster": "prompts_fixed.jsonl",
-    "Dymarska2025_associations": "prompts_fixed.jsonl",
-    "stella2026_formamentis_data": "prompts_fixed.jsonl",
-    "guenther2023associations_individual": "prompts_fixed.jsonl",
-    "marson2026_eplep": "prompts_fixed.jsonl",
+    "devardaetal2024_cloze": "prompts_fixed",
+    "devardaetal2024_rating": "prompts_fixed",
+    "lynott2020lancaster": "prompts_fixed",
+    "Dymarska2025_associations": "prompts_fixed",
+    "stella2026_formamentis_data": "prompts_fixed",
+    "guenther2023associations_individual": "prompts_fixed",
+    "marson2026_eplep": "prompts_fixed",
 }
 # Known-working studies, untouched by today's fix, included as a sanity check
 # that the test methodology itself isn't the thing producing 100% -- also
@@ -100,14 +104,29 @@ FIXED_STUDIES = {
 # recipe, 32768; the two "controls" only looked partial earlier in this
 # session's investigation because that first pass used a too-small max_length).
 CONTROL_STUDIES = {
-    "balota2007_LDT": "prompts.jsonl.zip",
-    "guenther2020LDT": "prompts.jsonl.zip",
+    "balota2007_LDT": "prompts",
+    "guenther2020LDT": "prompts",
 }
 
 
-def read_records(study: str, fname: str, limit: int | None) -> list[dict]:
-    path = ROOT / study / fname
-    if fname.endswith(".zip"):
+def find_prompts_path(study: str, basename: str) -> Path | None:
+    """Mirrors data_loader._read_records's own fallback order: plain .jsonl
+    first, then .jsonl.zip (package_for_cluster.sh always zips; a local
+    checkout may have either)."""
+    plain = ROOT / study / f"{basename}.jsonl"
+    if plain.is_file():
+        return plain
+    zipped = ROOT / study / f"{basename}.jsonl.zip"
+    if zipped.is_file():
+        return zipped
+    return None
+
+
+def read_records(study: str, basename: str, limit: int | None) -> list[dict]:
+    path = find_prompts_path(study, basename)
+    if path is None:
+        raise FileNotFoundError(f"{ROOT / study / basename}.jsonl(.zip) not found")
+    if path.suffix == ".zip":
         with zipfile.ZipFile(path) as zf:
             name = next(n for n in zf.namelist() if n.endswith(".jsonl"))
             with zf.open(name) as fh:
@@ -171,12 +190,12 @@ def verify_studies(tokenizer, collator, studies: dict[str, str], limit: int | No
     boundary bug this script exists to catch. Only mismatches on units that
     fit comfortably within the token budget count as a genuine FAIL."""
     results = {}
-    for study, fname in studies.items():
-        path = ROOT / study / fname
-        if not path.is_file():
-            print(f"  [SKIP] {study}: {path} not found")
+    for study, basename in studies.items():
+        path = find_prompts_path(study, basename)
+        if path is None:
+            print(f"  [SKIP] {study}: {ROOT / study / basename}.jsonl(.zip) not found")
             continue
-        records = read_records(study, fname, limit)
+        records = read_records(study, basename, limit)
         units = []
         for rec in records:
             units.extend(chunk_record(rec) if study in CHUNK_CANDIDATES else [rec])
