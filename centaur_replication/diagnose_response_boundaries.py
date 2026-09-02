@@ -97,6 +97,7 @@ FIXED_STUDIES = {
     "stella2026_formamentis_data": "prompts_fixed",
     "guenther2023associations_individual": "prompts_fixed",
     "marson2026_eplep": "prompts_fixed",
+    "frank2013_reading": "prompts_fixed",
 }
 # Known-working studies, untouched by today's fix, included as a sanity check
 # that the test methodology itself isn't the thing producing 100% -- also
