@@ -36,15 +36,31 @@ MAX_SEQ_TOKENS = 32768  # Centaur's literal cap, DataTrainingArguments.max_seq_l
 STUDIES = [
     "Dymarska2025_associations", "balota2007_LDT",
     "balota2007_naming", "brysbaert2014_Concreteness", "devardaetal2024_cloze",
-    "devardaetal2024_rating", "frank2013_reading", "futrell2021_corpus",
+    "devardaetal2024_rating", "frank2013_reading", "frank2013_reading_eyetracking",
+    "futrell2021_corpus",
     "guenther2020LDT", "guenther2020TS", "guenther2022relational", "guenther2023ViSpa",
     "guenther2023associations_individual", "guenther2023grammaticality",
     "guenther2024comprehension", "guenther2024substitutions", "hilton2021_comprehension",
-    "hutchison2013_semantic", "keuleers2011_britishlexiconproject",
+    "hutchison2013_semantic", "hutchison2013_semantic_naming", "keuleers2011_britishlexiconproject",
     "kyroelaeinen2022_valence", "lynott2020lancaster", "marson2026_eplep",
     "pexman2016_calgary", "pissani2026_metaphor",
-    "stella2026_formamentis_data", "tsaregorodtseva2026_mousetracking",
-]  # schiekiera2026_pwi_en dropped for now (26 studies) -- data files untouched on disk
+    "stella2026_formamentis_data", "stella2026_formamentis_data_valence",
+    "tsaregorodtseva2026_mousetracking",
+]  # schiekiera2026_pwi_en dropped for now (29 studies) -- data files untouched on disk.
+# frank2013_reading_eyetracking, hutchison2013_semantic_naming,
+# stella2026_formamentis_data_valence added this session: each of
+# frank2013_reading/hutchison2013_semantic/stella2026_formamentis_data was
+# found to pool genuinely different response constructs under one folder
+# (self-paced-reading RT + eye-tracking fixation duration + embedded
+# comprehension-check; lexical-decision choice + naming RT; word-association
+# production + valence rating) -- split into separate studies, paradigm
+# assigned by construct measured, not response modality (see
+# analysis/corpus_overview/fix_prompts.py's fix_frank2013_reading/
+# fix_hutchison2013_semantic/fix_stella2026_formamentis_data docstrings).
+# tsaregorodtseva2026_mousetracking's paradigm label also changed (in
+# experiment_metadata.csv, not here) from "mouse-tracking" to "semantic
+# decision" -- same construct (concrete/abstract classification) as
+# pexman2016_calgary, just measured via mouse-drag instead of button-press.
 
 # Studies whose real sequences can exceed MAX_SEQ_TOKENS after the session-collapsing
 # fix in PROMPT_CLEANING_FIXES.md -- confirmed by direct measurement, not assumed.

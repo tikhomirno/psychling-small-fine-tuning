@@ -18,7 +18,7 @@ devardaetal2024_cloze,devardaetal2024_cloze,,cloze,English
 devardaetal2024_rating,devardaetal2024_rating,,norms/ratings,English
 devardalamarraetal2025_iconicity,devardalamarraetal2025_iconicity,,norms/ratings,Italian
 frank2013_reading (self-paced reading),frank2013_reading,exp1,self-paced reading,English
-frank2013_reading (eye tracking),frank2013_reading,exp2,eye tracking (reading),English
+frank2013_reading (eye tracking),frank2013_reading_eyetracking,exp2,self-paced reading,English
 futrell2021_corpus,futrell2021_corpus,,self-paced reading,English
 gatti2022_false_semantic_memory,gatti2022_false_semantic_memory,,recognition memory,Italian
 gatti2022_false_semantic_memory_pr,gatti2022_false_semantic_memory_pr,,recognition memory,Italian
@@ -38,7 +38,7 @@ guenther2026_crosslingcommunication (pseudoword production),guenther2026_crossli
 guenther2026_crosslingcommunication (meaning guessing),guenther2026_crosslingcommunication,exp2,meaning guessing,German
 hilton2021_comprehension,hilton2021_comprehension,,comprehension,English
 hutchison2013_semantic (lexical decision),hutchison2013_semantic,exp1,lexical decision,English
-hutchison2013_semantic (naming),hutchison2013_semantic,exp2,naming,English
+hutchison2013_semantic (naming),hutchison2013_semantic_naming,exp2,naming,English
 jap2025_erp,jap2025_erp,,comprehension,Indonesian
 keuleers2010_DLP1,keuleers2010_DLP1,,lexical decision,Dutch
 keuleers2011_britishlexiconproject,keuleers2011_britishlexiconproject,,lexical decision,English
@@ -56,7 +56,7 @@ saban2024_ldt,saban2024_ldt,,lexical decision,Italian
 schiekiera2026_pwi_de,schiekiera2026_pwi_de,,picture-word interference,German
 schiekiera2026_pwi_en,schiekiera2026_pwi_en,,picture-word interference,English
 seilerelpelt_etal2025_textratings,seilerelpelt_etal2025_textratings,,norms/ratings,German
-tsaregorodtseva2026_mousetracking,tsaregorodtseva2026_mousetracking,,mouse-tracking,English
+tsaregorodtseva2026_mousetracking,tsaregorodtseva2026_mousetracking,,semantic decision,English
 vanHoef2022_naming,vanHoef2022_naming,,naming,English
 vergallito2020_ipsn (perceptual ratings),vergallito2020_ipsn,exp1,norms/ratings,Italian
 vergallito2020_ipsn (lexical decision),vergallito2020_ipsn,exp2,lexical decision,Italian
@@ -72,3 +72,4 @@ lynott2020lancaster (perceptual),lynott2020lancaster,exp1,norms/ratings,English
 lynott2020lancaster (action),lynott2020lancaster,exp2,norms/ratings,English
 wang2025_lexicaldecision,wang2025_lexicaldecision,,lexical decision,Chinese
 stella2026_formamentis_data,stella2026_formamentis_data,,word association,English
+stella2026_formamentis_data (valence rating),stella2026_formamentis_data_valence,,norms/ratings,English
