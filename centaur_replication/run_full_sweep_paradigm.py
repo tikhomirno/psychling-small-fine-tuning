@@ -64,6 +64,7 @@ trustworthy-over-logs pattern as run_full_sweep.py --audit.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -184,7 +185,16 @@ def audit_sweep(paradigms: list[str]) -> bool:
             evaluated[label] = not results.empty and bool((
                 (results["model_name"] == model_name) & (results["held_out_name"] == paradigm)
             ).any())
-        delta_path = centaur_eval.RESULTS_DIR / f"delta_minitaur_vs_ours__{dl._paradigm_slug(paradigm)}_overall.csv"
+        # NOT dl._paradigm_slug -- compute_delta_log_likelihood builds its own
+        # filename slug inline (centaur_eval.py's `safe_held_out`), which keeps
+        # hyphens (only spaces/slashes get replaced) unlike _paradigm_slug (which
+        # replaces every non-alphanumeric character, hyphens included). Every
+        # paradigm name except "self-paced reading" happens to produce the same
+        # slug either way; that one doesn't, and _paradigm_slug's version silently
+        # never matched an existing file. Must match centaur_eval.py's regex
+        # exactly, not just be "a reasonable slug".
+        safe_paradigm = re.sub(r"[^A-Za-z0-9_.-]+", "_", paradigm)
+        delta_path = centaur_eval.RESULTS_DIR / f"delta_minitaur_vs_ours__{safe_paradigm}_overall.csv"
         rows.append({"paradigm": paradigm, "checkpoint": has_checkpoint, "eval": evaluated,
                      "delta_computed": delta_path.is_file()})
 
