@@ -98,6 +98,15 @@ FIXED_STUDIES = {
     "guenther2023associations_individual": "prompts_fixed",
     "marson2026_eplep": "prompts_fixed",
     "frank2013_reading": "prompts_fixed",
+    # Split by construct this session (paradigm audit round 2) -- verifying
+    # these confirms both the new split-out files AND the re-derived
+    # originals (frank2013_reading/stella2026_formamentis_data above were
+    # already here, but their content changed and is worth re-proving, not
+    # assumed still-clean just because the filename didn't change).
+    "frank2013_reading_eyetracking": "prompts_fixed",
+    "hutchison2013_semantic": "prompts_fixed",
+    "hutchison2013_semantic_naming": "prompts_fixed",
+    "stella2026_formamentis_data_valence": "prompts_fixed",
 }
 # Known-working studies, untouched by today's fix, included as a sanity check
 # that the test methodology itself isn't the thing producing 100% -- also
