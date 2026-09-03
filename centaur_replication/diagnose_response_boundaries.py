@@ -119,10 +119,24 @@ CONTROL_STUDIES = {
 }
 
 
-def find_prompts_path(study: str, basename: str) -> Path | None:
+SUBSAMPLED_BY_STUDY_DIR = ROOT / "centaur_replication" / "data" / "subsampled_by_study"
+
+
+def find_prompts_path(study: str, basename: str, subsampled: bool = False) -> Path | None:
     """Mirrors data_loader._read_records's own fallback order: plain .jsonl
     first, then .jsonl.zip (package_for_cluster.sh always zips; a local
-    checkout may have either)."""
+    checkout may have either).
+
+    subsampled=True instead points at the MATERIALIZED subsample
+    (data_loader.SUBSAMPLED_BY_STUDY_DIR, built by build_subsampled_corpus.py)
+    -- the exact file build_training_dataset/build_held_out_dataset actually
+    read for a real run, already trial-capped AND already chunked for
+    CHUNK_CANDIDATES studies. Verifying this instead of the raw full corpus
+    checks the real training input directly, and is far smaller/faster for
+    any study that got capped (up to 10.6M raw trials down to 100k)."""
+    if subsampled:
+        path = SUBSAMPLED_BY_STUDY_DIR / f"{study}.jsonl"
+        return path if path.is_file() else None
     plain = ROOT / study / f"{basename}.jsonl"
     if plain.is_file():
         return plain
@@ -132,9 +146,13 @@ def find_prompts_path(study: str, basename: str) -> Path | None:
     return None
 
 
-def read_records(study: str, basename: str, limit: int | None) -> list[dict]:
-    path = find_prompts_path(study, basename)
+def read_records(study: str, basename: str, limit: int | None, subsampled: bool = False) -> list[dict]:
+    path = find_prompts_path(study, basename, subsampled)
     if path is None:
+        if subsampled:
+            raise FileNotFoundError(
+                f"{SUBSAMPLED_BY_STUDY_DIR / study}.jsonl not found -- did "
+                f"build_subsampled_corpus.py run yet on this checkout?")
         raise FileNotFoundError(f"{ROOT / study / basename}.jsonl(.zip) not found")
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as zf:
@@ -189,7 +207,8 @@ def real_item_count(collator, tokenizer, text: str, max_length: int = 32768) -> 
     return n
 
 
-def verify_studies(tokenizer, collator, studies: dict[str, str], limit: int | None) -> dict[str, tuple[int, int, int, int]]:
+def verify_studies(tokenizer, collator, studies: dict[str, str], limit: int | None,
+                    subsampled: bool = False) -> dict[str, tuple[int, int, int, int]]:
     """Returns {study: (n_units, n_boundary_bug_mismatches, total_expected, total_real)}.
 
     A mismatch is classified as a KNOWN TRUNCATION case (not a boundary-bug
@@ -201,14 +220,19 @@ def verify_studies(tokenizer, collator, studies: dict[str, str], limit: int | No
     fit comfortably within the token budget count as a genuine FAIL."""
     results = {}
     for study, basename in studies.items():
-        path = find_prompts_path(study, basename)
+        path = find_prompts_path(study, basename, subsampled)
         if path is None:
-            print(f"  [SKIP] {study}: {ROOT / study / basename}.jsonl(.zip) not found")
+            label = f"{SUBSAMPLED_BY_STUDY_DIR / study}.jsonl" if subsampled else f"{ROOT / study / basename}.jsonl(.zip)"
+            print(f"  [SKIP] {study}: {label} not found")
             continue
-        records = read_records(study, basename, limit)
+        records = read_records(study, basename, limit, subsampled)
         units = []
         for rec in records:
-            units.extend(chunk_record(rec) if study in CHUNK_CANDIDATES else [rec])
+            # subsampled cache is already chunked (build_subsampled_corpus.py
+            # applies _chunk_record before writing it) -- re-chunking here
+            # would be redundant, not wrong, but skip it for clarity.
+            needs_chunking = study in CHUNK_CANDIDATES and not subsampled
+            units.extend(chunk_record(rec) if needs_chunking else [rec])
 
         total_exp, total_real, n_bug_mismatch, n_truncation_mismatch = 0, 0, 0, 0
         for unit in units:
@@ -225,8 +249,9 @@ def verify_studies(tokenizer, collator, studies: dict[str, str], limit: int | No
         results[study] = (len(units), n_bug_mismatch, total_exp, total_real)
         pct = 100 * total_real / total_exp if total_exp else 100.0
         status = "PASS" if n_bug_mismatch == 0 else "FAIL"
-        scope = "full corpus" if limit is None else f"first {limit} records"
-        chunk_note = " (chunked, matching real training input)" if study in CHUNK_CANDIDATES else ""
+        base_scope = "subsampled (real training input)" if subsampled else "full corpus"
+        scope = base_scope if limit is None else f"{base_scope}, first {limit} records"
+        chunk_note = " (chunked, matching real training input)" if (study in CHUNK_CANDIDATES and not subsampled) else ""
         print(f"  [{status}] {study} ({scope}{chunk_note}): {len(units)} units, "
               f"{total_real}/{total_exp} items ({pct:.4f}%), "
               f"{n_bug_mismatch} boundary-bug mismatch(es)"
@@ -263,6 +288,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sample", type=int, default=None,
                          help="only check the first N records per study (default: full corpus)")
+    parser.add_argument("--subsampled", action="store_true",
+                         help="check centaur_replication/data/subsampled_by_study/<study>.jsonl "
+                              "(the materialized, trial-capped file build_training_dataset/"
+                              "build_held_out_dataset actually read for a real run) instead of "
+                              "the raw full corpus -- smaller/faster, and checks the exact real "
+                              "training input directly. Requires build_subsampled_corpus.py to "
+                              "have already run on this checkout.")
     parser.add_argument("--adjacency", action="store_true",
                          help="also print the bracket-adjacency A/B reference cases")
     args = parser.parse_args()
@@ -275,11 +307,11 @@ def main():
         tokenizer=tokenizer,
     )
 
-    print("\n--- 7 studies fixed by RESPONSE_BOUNDARY_FIXES.md (must be 100% for the fix to count as proven) ---")
-    fixed_results = verify_studies(tokenizer, collator, FIXED_STUDIES, args.sample)
+    print(f"\n--- {len(FIXED_STUDIES)} studies fixed this session (must be 100% for the fix to count as proven) ---")
+    fixed_results = verify_studies(tokenizer, collator, FIXED_STUDIES, args.sample, args.subsampled)
 
     print("\n--- control studies (never broken, sanity-check the test methodology itself) ---")
-    verify_studies(tokenizer, collator, CONTROL_STUDIES, args.sample)
+    verify_studies(tokenizer, collator, CONTROL_STUDIES, args.sample, args.subsampled)
 
     if args.adjacency:
         print_adjacency_reference(tokenizer, collator)
