@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_minitaur,sem_nll_minitaur,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+futrell2021_corpus,61443,4.351581048059787,0.007679252032915244,4.404260537809179,0.007484805855062571,-0.05267948974939171,0.0027417545749846566

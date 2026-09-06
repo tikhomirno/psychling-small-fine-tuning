@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+kyroelaeinen2022_valence,100080,1.5770061877134034,0.0029623351190490393,1.5076899216710615,0.002715473336634832,0.06931626604234191,0.0014873746291747434

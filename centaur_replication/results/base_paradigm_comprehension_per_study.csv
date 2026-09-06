@@ -1,0 +1,3 @@
+experiment,n_items,mean_summed_nll_per_item,total_nll
+guenther2024comprehension,27522,0.5256193959516335,14466.09701538086
+hilton2021_comprehension,2920,0.7553418616725974,2205.5982360839844

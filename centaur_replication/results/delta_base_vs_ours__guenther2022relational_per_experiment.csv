@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+guenther2022relational,22000,2.809940739024769,0.007400463357069664,2.756498795942827,0.010421016888962338,0.05344194308194247,0.006454023303374934

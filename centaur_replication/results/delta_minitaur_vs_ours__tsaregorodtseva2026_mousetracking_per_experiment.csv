@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_minitaur,sem_nll_minitaur,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+tsaregorodtseva2026_mousetracking,55760,0.4152458114295642,0.0019259474889695898,0.3378456767012433,0.0022587819666580237,0.07740013472832087,0.0016188869095553444

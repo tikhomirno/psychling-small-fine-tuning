@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+devardaetal2024_rating,100106,1.349808554433765,0.002657033475544001,1.2698861191999762,0.0023914228265788143,0.0799224352337889,0.0014430225385248156

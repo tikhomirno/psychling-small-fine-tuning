@@ -1,0 +1,3 @@
+experiment,n_items,mean_summed_nll_per_item,total_nll
+frank2013_reading,246127,4.525274786484404,1113792.3073730469
+futrell2021_corpus,162336,4.345884933336326,705493.5765380859

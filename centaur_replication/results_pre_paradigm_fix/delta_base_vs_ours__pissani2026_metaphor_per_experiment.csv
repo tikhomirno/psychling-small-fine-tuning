@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+pissani2026_metaphor,40653,1.6421579443490295,0.0038469895215291604,1.6073860418247308,0.0037850469137322745,0.03477190252429864,0.002073795597205715

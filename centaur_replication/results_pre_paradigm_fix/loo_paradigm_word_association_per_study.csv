@@ -1,0 +1,4 @@
+experiment,n_items,mean_summed_nll_per_item,total_nll
+Dymarska2025_associations,7207,6.3231722727320765,45571.10256958008
+guenther2023associations_individual,41886,5.656699226094153,236936.5037841797
+stella2026_formamentis_data,12152,3.3584251403808594,40811.5823059082

@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+brysbaert2014_Concreteness,142202,1.2657254557155462,0.002182159225867336,1.1568892806178666,0.0023686962173615467,0.1088361750976796,0.0020053731435397473

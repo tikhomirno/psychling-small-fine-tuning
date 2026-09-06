@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_minitaur,sem_nll_minitaur,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+marson2026_eplep,93650,0.2834496689046441,0.0021494085720936257,0.23739348110640934,0.002281998099948018,0.04605618779823478,0.0011696274891595478

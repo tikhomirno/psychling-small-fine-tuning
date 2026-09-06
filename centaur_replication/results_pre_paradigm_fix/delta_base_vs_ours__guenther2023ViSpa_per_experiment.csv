@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+guenther2023ViSpa,66110,1.5322346957507789,0.003153378291853684,1.3987967686616352,0.0029533548208593124,0.13343792708914357,0.002198099778351658

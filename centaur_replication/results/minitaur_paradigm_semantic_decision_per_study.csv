@@ -1,0 +1,3 @@
+experiment,n_items,mean_summed_nll_per_item,total_nll
+pexman2016_calgary,310354,0.39683621999856794,123159.70822143555
+tsaregorodtseva2026_mousetracking,55760,0.4152458114295642,23154.1064453125

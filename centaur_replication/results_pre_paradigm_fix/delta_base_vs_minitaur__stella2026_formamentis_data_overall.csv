@@ -1,0 +1,2 @@
+n_responses,mean_nll_base,mean_nll_minitaur,mean_delta_log_likelihood,sem_delta_log_likelihood
+12152,3.4403144304025637,3.4255619815025304,0.014752448900033174,0.0007559385115593064

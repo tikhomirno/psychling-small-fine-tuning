@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+devardaetal2024_cloze,100071,3.9020755496141684,0.00953661123733915,3.654216914377023,0.008820981457596914,0.24785863523714569,0.003260482923479942

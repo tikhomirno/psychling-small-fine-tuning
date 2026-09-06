@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_minitaur,sem_nll_minitaur,mean_delta_log_likelihood,sem_delta_log_likelihood
+lynott2020lancaster,100485,0.7754995061063218,0.0036276956857134385,0.7727259340052309,0.003622730330972154,0.0027735721010909587,0.00014396289027266549

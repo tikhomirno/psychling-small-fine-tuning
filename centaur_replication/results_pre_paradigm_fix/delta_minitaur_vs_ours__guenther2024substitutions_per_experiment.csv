@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_minitaur,sem_nll_minitaur,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+guenther2024substitutions,45198,6.761833172350037,0.05156748310861296,6.293250515332364,0.0639653008278133,0.4685826570176726,0.015365982710063779

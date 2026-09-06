@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_minitaur,sem_nll_minitaur,mean_delta_log_likelihood,sem_delta_log_likelihood
+hutchison2013_semantic_naming,100371,5.9031471366231285,0.003977300398556768,5.902885567980293,0.003959910773887007,0.0002615686428350818,0.00028332924368444147

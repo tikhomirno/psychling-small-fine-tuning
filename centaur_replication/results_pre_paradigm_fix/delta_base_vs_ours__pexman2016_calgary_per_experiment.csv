@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+pexman2016_calgary,100448,0.4000401562207366,0.0016132852818376159,0.32533268292036055,0.0017589352298895027,0.07470747330037604,0.0011436450460798136

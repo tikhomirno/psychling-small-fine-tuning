@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+guenther2023associations_individual,41886,5.911458576681256,0.012985510787804652,5.602351186246225,0.012764603312813714,0.30910739043503127,0.004898933989845951

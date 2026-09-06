@@ -1,0 +1,3 @@
+experiment,n_items,mean_summed_nll_per_item,total_nll
+balota2007_naming,323240,6.377004605710927,2061302.96875
+hutchison2013_semantic_naming,177201,5.880930676886699,1042106.796875

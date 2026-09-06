@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+hutchison2013_semantic,107965,2.2528808579616912,0.008815618722214228,2.221066676090233,0.008740090977357812,0.03181418187145791,0.004803060880191307

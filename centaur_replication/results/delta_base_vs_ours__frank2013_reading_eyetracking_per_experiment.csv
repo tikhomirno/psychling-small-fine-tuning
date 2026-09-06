@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+frank2013_reading_eyetracking,37903,4.279951455029945,0.005500041559070974,4.392954046039397,0.006260022019357238,-0.11300259100945176,0.004077955096699106

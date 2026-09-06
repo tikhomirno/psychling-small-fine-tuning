@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+futrell2021_corpus,61446,4.35372159853774,0.007696407285884952,4.359198710650154,0.007392801282395541,-0.005477112112413745,0.0023340798952008477

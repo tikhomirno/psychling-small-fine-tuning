@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_minitaur,sem_nll_minitaur,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+frank2013_reading,100409,5.045844877264488,0.005173487741375594,4.999795329290701,0.005132016550705854,0.046049547973787214,0.0014294150276407374

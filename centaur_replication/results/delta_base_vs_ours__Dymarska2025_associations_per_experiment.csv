@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+Dymarska2025_associations,7207,6.566650847944056,0.03488998046436955,6.201873368556612,0.03408189697304256,0.3647774793874445,0.013661343645894502

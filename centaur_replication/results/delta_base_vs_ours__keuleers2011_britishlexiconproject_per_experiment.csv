@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+keuleers2011_britishlexiconproject,100315,0.04417173215163251,0.0011529676209287283,0.01748966585334322,0.0004405589316272487,0.026682066298289293,0.000845093700280994

@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_base,sem_nll_base,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+stella2026_formamentis_data,12152,3.4403144304025637,0.03253728250651144,3.3540836281490765,0.033025554357393114,0.08623080225348707,0.007420714066308487

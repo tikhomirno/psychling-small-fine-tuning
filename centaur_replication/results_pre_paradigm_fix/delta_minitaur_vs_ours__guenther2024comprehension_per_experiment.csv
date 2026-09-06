@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_minitaur,sem_nll_minitaur,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+guenther2024comprehension,27522,0.517388797812957,0.007695071923638034,0.4137519452211668,0.006037869069446048,0.1036368525917902,0.004421118570443685

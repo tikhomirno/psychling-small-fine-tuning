@@ -1,0 +1,2 @@
+experiment,n_responses,mean_nll_minitaur,sem_nll_minitaur,mean_nll_ours,sem_nll_ours,mean_delta_log_likelihood,sem_delta_log_likelihood
+balota2007_naming,120839,6.436534355630219,0.0037629604823456292,6.37435968520097,0.0035246276773836694,0.06217467042924883,0.0022936200296892898
